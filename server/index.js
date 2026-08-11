@@ -347,65 +347,80 @@ app.post("/api/bridge/jobs/:id/result", bridgeAuth, async (req, res) => {
       // results = live AdsPower profiles [{adspower_user_id, name, group, host, port}]
       const live = results || [];
       const liveIds = new Set(live.map((p) => p.adspower_user_id).filter(Boolean));
-      let matchedProxy = 0, addedProxy = 0, newProfile = 0, updatedProfile = 0, noProxyInfo = 0;
+      let matchedProxy = 0, addedProxy = 0, newProfile = 0, updatedProfile = 0, noProxyInfo = 0, failed = 0;
+      const errors = [];
 
       // 1) import EVERY live profile. Link it to a matching proxy in our
       //    inventory when we have one; otherwise add the proxy so the profile
       //    is still recorded (host/port may be blank if AdsPower omits it).
+      //    Each profile runs inside its own savepoint, so one bad row can't
+      //    abort the whole import — it's counted as failed and reported.
       for (const p of live) {
-        let proxyId = null;
-        if (p.host && p.port) {
-          let px = (
-            await client.query(
-              `select id from proxies where host=$1 and port=$2
-               order by (status='unused') desc limit 1`,
-              [p.host, p.port]
-            )
-          ).rows[0];
-          if (!px) {
-            addedProxy++;
-            px = (
+        await client.query("savepoint sp");
+        try {
+          let proxyId = null;
+          let dAdded = 0, dMatched = 0, dNoInfo = 0;
+          if (p.host && p.port) {
+            let px = (
               await client.query(
-                `insert into proxies (host, port, proxy_type, source, status)
-                 values ($1,$2,'http','adspower-sync','used')
-                 on conflict (host, port, username)
-                 do update set status='used' returning id`,
+                `select id from proxies where host=$1 and port=$2
+                 order by (status='unused') desc limit 1`,
                 [p.host, p.port]
               )
             ).rows[0];
+            if (!px) {
+              // not in inventory — add it. Plain insert is safe: we only get
+              // here when no row for this host:port exists yet.
+              dAdded = 1;
+              px = (
+                await client.query(
+                  `insert into proxies (host, port, proxy_type, source, status)
+                   values ($1,$2,'http','adspower-sync','used') returning id`,
+                  [p.host, p.port]
+                )
+              ).rows[0];
+            } else {
+              dMatched = 1;
+              await client.query(`update proxies set status='used' where id=$1`, [px.id]);
+            }
+            proxyId = px.id;
           } else {
-            matchedProxy++;
-            await client.query(`update proxies set status='used' where id=$1`, [px.id]);
+            dNoInfo = 1;
           }
-          proxyId = px.id;
-        } else {
-          noProxyInfo++;
-        }
 
-        // upsert the profile keyed on AdsPower's own id (stable across syncs)
-        const existing = p.adspower_user_id
-          ? (
-              await client.query(
-                `select id from profiles where adspower_user_id=$1 limit 1`,
-                [p.adspower_user_id]
-              )
-            ).rows[0]
-          : null;
-        if (existing) {
-          updatedProfile++;
-          await client.query(
-            `update profiles
-             set name=$1, group_name=$2, proxy_id=coalesce($3, proxy_id), status='created'
-             where id=$4`,
-            [p.name || "", p.group || "", proxyId, existing.id]
-          );
-        } else {
-          newProfile++;
-          await client.query(
-            `insert into profiles (name, group_name, proxy_id, adspower_user_id, status)
-             values ($1,$2,$3,$4,'created')`,
-            [p.name || "", p.group || "", proxyId, p.adspower_user_id || ""]
-          );
+          // upsert the profile keyed on AdsPower's own id (stable across syncs)
+          const existing = p.adspower_user_id
+            ? (
+                await client.query(
+                  `select id from profiles where adspower_user_id=$1 limit 1`,
+                  [p.adspower_user_id]
+                )
+              ).rows[0]
+            : null;
+          if (existing) {
+            await client.query(
+              `update profiles
+               set name=$1, group_name=$2, proxy_id=coalesce($3, proxy_id), status='created'
+               where id=$4`,
+              [p.name || "", p.group || "", proxyId, existing.id]
+            );
+          } else {
+            await client.query(
+              `insert into profiles (name, group_name, proxy_id, adspower_user_id, status)
+               values ($1,$2,$3,$4,'created')`,
+              [p.name || "", p.group || "", proxyId, p.adspower_user_id || ""]
+            );
+          }
+          await client.query("release savepoint sp");
+          addedProxy += dAdded;
+          matchedProxy += dMatched;
+          noProxyInfo += dNoInfo;
+          existing ? updatedProfile++ : newProfile++;
+        } catch (e) {
+          await client.query("rollback to savepoint sp");
+          failed++;
+          if (errors.length < 5)
+            errors.push(`${p.name || p.adspower_user_id || "?"}: ${e.message}`);
         }
       }
       syncSummary = {
@@ -415,30 +430,39 @@ app.post("/api/bridge/jobs/:id/result", bridgeAuth, async (req, res) => {
         matchedProxy,
         addedProxy,
         noProxyInfo,
+        failed,
+        errors,
       };
 
       // 2) reconcile deletions: profiles we recorded as created whose AdsPower
       //    id is no longer live were removed in AdsPower. Mark deleted and free
-      //    the proxy if nothing else is using it.
-      const known = (
-        await client.query(
-          `select id, proxy_id, adspower_user_id from profiles
-           where status='created' and adspower_user_id <> ''`
-        )
-      ).rows;
-      for (const k of known) {
-        if (liveIds.has(k.adspower_user_id)) continue;
-        await client.query(`update profiles set status='deleted' where id=$1`, [k.id]);
-        if (k.proxy_id) {
-          const other = (
-            await client.query(
-              `select 1 from profiles where proxy_id=$1 and status='created' limit 1`,
-              [k.proxy_id]
-            )
-          ).rows[0];
-          if (!other)
-            await client.query(`update proxies set status='unused' where id=$1`, [k.proxy_id]);
+      //    the proxy if nothing else is using it. Wrapped in a savepoint so a
+      //    failure here can't roll back the imports above.
+      await client.query("savepoint recon");
+      try {
+        const known = (
+          await client.query(
+            `select id, proxy_id, adspower_user_id from profiles
+             where status='created' and adspower_user_id <> ''`
+          )
+        ).rows;
+        for (const k of known) {
+          if (liveIds.has(k.adspower_user_id)) continue;
+          await client.query(`update profiles set status='deleted' where id=$1`, [k.id]);
+          if (k.proxy_id) {
+            const other = (
+              await client.query(
+                `select 1 from profiles where proxy_id=$1 and status='created' limit 1`,
+                [k.proxy_id]
+              )
+            ).rows[0];
+            if (!other)
+              await client.query(`update proxies set status='unused' where id=$1`, [k.proxy_id]);
+          }
         }
+        await client.query("release savepoint recon");
+      } catch (e) {
+        await client.query("rollback to savepoint recon");
       }
     }
     await client.query(
