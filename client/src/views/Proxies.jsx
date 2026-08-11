@@ -73,6 +73,9 @@ export default function Proxies() {
                 `${s.newProfile} new, ${s.updatedProfile} updated · ` +
                 `proxies: ${s.matchedProxy} matched, ${s.addedProxy} added` +
                 (s.noProxyInfo ? ` · ${s.noProxyInfo} had no proxy info` : "") +
+                (s.failed
+                  ? ` · ${s.failed} failed${s.errors?.length ? ` (${s.errors[0]})` : ""}`
+                  : "") +
                 (s.returned === 0
                   ? ". AdsPower reported no profiles — check AdsPower is open with the Local API enabled and that profiles exist."
                   : ". See the Jobs tab for the imported profiles.")
