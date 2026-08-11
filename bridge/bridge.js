@@ -7,6 +7,9 @@ const AP = process.env.ADSPOWER_API || "http://local.adspower.net:50325";
 const POLL = (+process.env.POLL_SECONDS || 5) * 1000;
 const AP_RATE = 1100; // AdsPower: 1 req/sec
 const HOST = os.hostname();
+// Bump when bridge behaviour changes; surfaced in the web UI so you can tell
+// at a glance whether the running bridge has the latest code.
+const BRIDGE_VERSION = "os-windows-fix";
 
 if (!CLOUD || !TOKEN) {
   console.error("Set CLOUD_URL and BRIDGE_TOKEN in bridge/.env");
@@ -22,6 +25,7 @@ async function cloud(method, path, body) {
       "Content-Type": "application/json",
       "x-bridge-token": TOKEN,
       "x-bridge-host": HOST,
+      "x-bridge-version": BRIDGE_VERSION,
     },
     body: body ? JSON.stringify(body) : undefined,
   });
@@ -56,15 +60,6 @@ const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 // AdsPower ua_system_version values that pin a profile to an OS family.
 const OS_SYSTEM = { windows: "Windows", macos: "Mac OS X" };
 
-// recent Chrome major versions to vary the explicit UA
-const CHROME_VERSIONS = ["128", "129", "130", "131", "132", "133", "134", "135", "136"];
-
-function buildUa(resolvedOs, version) {
-  if (resolvedOs === "macos")
-    return `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${version}.0.0.0 Safari/537.36`;
-  return `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${version}.0.0.0 Safari/537.36`;
-}
-
 // OS-appropriate WebGL vendor/renderer pools (kept consistent with the OS)
 const WEBGL = {
   windows: [
@@ -87,21 +82,21 @@ function resolveOs(os) {
   return pick(["windows", "macos"]); // "random" → mix Windows + Mac per profile
 }
 
-// Build a fingerprint pinned to `resolvedOs` (windows|macos). Two independent
-// OS controls, both set to the SAME OS so AdsPower can't drift:
-//   - an explicit `ua` string whose platform is the chosen OS, and
-//   - random_ua.ua_system_version constraining generated UAs to that OS.
-// No browser_kernel_config "ua_auto" — that is what previously let AdsPower
-// regenerate a random-OS UA and override the choice.
+// Build a fingerprint pinned to `resolvedOs` (windows|macos). Mirrors the
+// AdsPower UI "OS: All <family>" + "User Agent: All":
+//   random_ua.ua_system_version = the OS family (Windows / Mac OS X); ua_version
+//   omitted so AdsPower randomises the browser version within that OS.
+// IMPORTANT: do NOT also send an explicit `ua` — providing both makes AdsPower
+// ignore the constraint and fall back to a random OS. No browser_kernel_config
+// "ua_auto" either (that was the original random-OS override).
 function buildFingerprint(resolvedOs) {
   const gl = pick(WEBGL[resolvedOs]);
-  const version = pick(CHROME_VERSIONS);
   return {
     automatic_timezone: "1",
     language: ["en-US"],
     webrtc: "proxy",
-    ua: buildUa(resolvedOs, version),
     random_ua: { ua_system_version: [OS_SYSTEM[resolvedOs]] },
+    // WebGL metadata: Custom (OS-appropriate vendor/renderer) + image noise
     webgl_image: "1",
     webgl_config: { webgl_vendor: gl.vendor, webgl_renderer: gl.renderer },
   };

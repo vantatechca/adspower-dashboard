@@ -85,6 +85,11 @@ export default function App() {
             <b className={bridge.online ? "up" : "down"}>
               {bridge.online ? "online" : "offline"}
             </b>
+            {bridge.version && (
+              <span style={{ marginLeft: 6, color: "var(--muted)", fontSize: 11 }}>
+                ({bridge.version})
+              </span>
+            )}
           </span>
           <span style={{ marginLeft: 14 }}>
             ai <b className={ai ? "up" : "down"}>{ai ? "on" : "off"}</b>
