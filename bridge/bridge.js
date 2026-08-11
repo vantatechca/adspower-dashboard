@@ -119,12 +119,21 @@ async function runSync() {
     const res = await fetch(
       `${AP}/api/v1/user/list?page=${page}&page_size=100`
     ).then((r) => r.json());
+    if (res?.code !== 0) {
+      console.error(
+        `[sync] AdsPower user/list error (page ${page}):`,
+        res?.msg || JSON.stringify(res)
+      );
+      break;
+    }
     const list = res?.data?.list || [];
+    if (page === 1)
+      console.log(`[sync] AdsPower reports ${res?.data?.page?.count ?? list.length} profile(s)`);
     if (!list.length) break;
     for (const p of list) {
       const cfg = p.user_proxy_config || {};
       profiles.push({
-        adspower_user_id: p.user_id || "",
+        adspower_user_id: p.user_id || p.serial_number || "",
         name: p.name || "",
         group: p.group_name || "",
         host: cfg.proxy_host || "",
@@ -135,6 +144,8 @@ async function runSync() {
     page++;
     await sleep(AP_RATE);
   }
+  console.log(`[sync] collected ${profiles.length} profile(s) to send to cloud`);
+  if (profiles[0]) console.log(`[sync] sample profile:`, JSON.stringify(profiles[0]));
   return profiles;
 }
 
