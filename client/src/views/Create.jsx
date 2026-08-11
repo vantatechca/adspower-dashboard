@@ -7,7 +7,7 @@ export default function Create() {
   const [prefix, setPrefix] = useState("Profile");
   const [start, setStart] = useState(1);
   const [group, setGroup] = useState("");
-  const [os, setOs] = useState("random");
+  const [os, setOs] = useState("windows");
   const [count, setCount] = useState(10);
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -101,9 +101,9 @@ export default function Create() {
           <div style={{ flex: "0 0 220px" }}>
             <label>Operating system</label>
             <select value={os} onChange={(e) => setOs(e.target.value)}>
-              <option value="random">Random (mix Win + Mac)</option>
               <option value="windows">Windows</option>
               <option value="macos">macOS</option>
+              <option value="random">Random (mix Win + Mac)</option>
             </select>
           </div>
           <div style={{ flex: 1, alignSelf: "flex-end" }}>

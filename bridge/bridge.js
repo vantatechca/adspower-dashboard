@@ -56,6 +56,15 @@ const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 // AdsPower ua_system_version values that pin a profile to an OS family.
 const OS_SYSTEM = { windows: "Windows", macos: "Mac OS X" };
 
+// recent Chrome major versions to vary the explicit UA
+const CHROME_VERSIONS = ["128", "129", "130", "131", "132", "133", "134", "135", "136"];
+
+function buildUa(resolvedOs, version) {
+  if (resolvedOs === "macos")
+    return `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${version}.0.0.0 Safari/537.36`;
+  return `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${version}.0.0.0 Safari/537.36`;
+}
+
 // OS-appropriate WebGL vendor/renderer pools (kept consistent with the OS)
 const WEBGL = {
   windows: [
@@ -78,16 +87,20 @@ function resolveOs(os) {
   return pick(["windows", "macos"]); // "random" → mix Windows + Mac per profile
 }
 
-// Build a randomised fingerprint pinned to `resolvedOs` (windows|macos).
-// Uses AdsPower's random_ua.ua_system_version to force the OS family and let
-// AdsPower randomise the browser version within it; WebGL metadata is set from
-// an OS-appropriate pool with image noise on.
+// Build a fingerprint pinned to `resolvedOs` (windows|macos). Two independent
+// OS controls, both set to the SAME OS so AdsPower can't drift:
+//   - an explicit `ua` string whose platform is the chosen OS, and
+//   - random_ua.ua_system_version constraining generated UAs to that OS.
+// No browser_kernel_config "ua_auto" — that is what previously let AdsPower
+// regenerate a random-OS UA and override the choice.
 function buildFingerprint(resolvedOs) {
   const gl = pick(WEBGL[resolvedOs]);
+  const version = pick(CHROME_VERSIONS);
   return {
     automatic_timezone: "1",
     language: ["en-US"],
     webrtc: "proxy",
+    ua: buildUa(resolvedOs, version),
     random_ua: { ua_system_version: [OS_SYSTEM[resolvedOs]] },
     webgl_image: "1",
     webgl_config: { webgl_vendor: gl.vendor, webgl_renderer: gl.renderer },
@@ -97,6 +110,7 @@ function buildFingerprint(resolvedOs) {
 async function runCreate(job) {
   const items = job.payload.items || [];
   const os = job.payload.os || "random"; // windows | macos | random
+  console.log(`[create] job ${job.id}: ${items.length} profile(s), OS setting = ${os} (OS-pinned fingerprint)`);
   const results = [];
   const groupCache = {};
   for (const it of items) {
@@ -104,6 +118,7 @@ async function runCreate(job) {
     if (!(g in groupCache)) groupCache[g] = await resolveGroupId(g);
     const px = it.proxy || {};
     const resolvedOs = resolveOs(os);
+    console.log(`[create]  → ${it.name}: os=${resolvedOs}`);
     const payload = {
       name: it.name,
       group_id: groupCache[g],
@@ -225,7 +240,7 @@ async function tick() {
   }
 }
 
-console.log(`AdsPower bridge → ${CLOUD}\nPolling every ${POLL / 1000}s…`);
+console.log(`AdsPower bridge [os-pin build] → ${CLOUD}\nPolling every ${POLL / 1000}s…`);
 async function loop() {
   while (true) {
     await tick();
