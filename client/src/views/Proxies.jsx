@@ -66,10 +66,23 @@ export default function Proxies() {
         const j = jobs.find((x) => x.id === job_id);
         if (!j) continue;
         if (j.status === "done") {
-          setSyncMsg("Synced with AdsPower — counts updated.");
+          const s = j.result?.summary;
+          if (s) {
+            setSyncMsg(
+              `AdsPower returned ${s.returned} profile(s) — ` +
+                `${s.newProfile} new, ${s.updatedProfile} updated · ` +
+                `proxies: ${s.matchedProxy} matched, ${s.addedProxy} added` +
+                (s.noProxyInfo ? ` · ${s.noProxyInfo} had no proxy info` : "") +
+                (s.returned === 0
+                  ? ". AdsPower reported no profiles — check AdsPower is open with the Local API enabled and that profiles exist."
+                  : ". See the Jobs tab for the imported profiles.")
+            );
+          } else {
+            setSyncMsg("Synced with AdsPower — counts updated. See the Jobs tab for profiles.");
+          }
           done = true;
         } else if (j.status === "error") {
-          setSyncMsg("Sync error — is the bridge online?");
+          setSyncMsg("Sync error — is the bridge online and AdsPower running?");
           done = true;
         } else if (j.status === "pending" && i > 4) {
           setSyncMsg("Bridge hasn't picked it up — check it's online.");

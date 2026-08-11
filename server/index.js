@@ -301,6 +301,7 @@ app.post("/api/bridge/jobs/:id/result", bridgeAuth, async (req, res) => {
   if (!job) return res.status(404).json({ error: "no such job" });
 
   const client = await pool.connect();
+  let syncSummary = null;
   try {
     await client.query("begin");
     if (job.type === "create") {
@@ -346,6 +347,7 @@ app.post("/api/bridge/jobs/:id/result", bridgeAuth, async (req, res) => {
       // results = live AdsPower profiles [{adspower_user_id, name, group, host, port}]
       const live = results || [];
       const liveIds = new Set(live.map((p) => p.adspower_user_id).filter(Boolean));
+      let matchedProxy = 0, addedProxy = 0, newProfile = 0, updatedProfile = 0, noProxyInfo = 0;
 
       // 1) import EVERY live profile. Link it to a matching proxy in our
       //    inventory when we have one; otherwise add the proxy so the profile
@@ -361,6 +363,7 @@ app.post("/api/bridge/jobs/:id/result", bridgeAuth, async (req, res) => {
             )
           ).rows[0];
           if (!px) {
+            addedProxy++;
             px = (
               await client.query(
                 `insert into proxies (host, port, proxy_type, source, status)
@@ -371,9 +374,12 @@ app.post("/api/bridge/jobs/:id/result", bridgeAuth, async (req, res) => {
               )
             ).rows[0];
           } else {
+            matchedProxy++;
             await client.query(`update proxies set status='used' where id=$1`, [px.id]);
           }
           proxyId = px.id;
+        } else {
+          noProxyInfo++;
         }
 
         // upsert the profile keyed on AdsPower's own id (stable across syncs)
@@ -386,6 +392,7 @@ app.post("/api/bridge/jobs/:id/result", bridgeAuth, async (req, res) => {
             ).rows[0]
           : null;
         if (existing) {
+          updatedProfile++;
           await client.query(
             `update profiles
              set name=$1, group_name=$2, proxy_id=coalesce($3, proxy_id), status='created'
@@ -393,6 +400,7 @@ app.post("/api/bridge/jobs/:id/result", bridgeAuth, async (req, res) => {
             [p.name || "", p.group || "", proxyId, existing.id]
           );
         } else {
+          newProfile++;
           await client.query(
             `insert into profiles (name, group_name, proxy_id, adspower_user_id, status)
              values ($1,$2,$3,$4,'created')`,
@@ -400,6 +408,14 @@ app.post("/api/bridge/jobs/:id/result", bridgeAuth, async (req, res) => {
           );
         }
       }
+      syncSummary = {
+        returned: live.length,
+        newProfile,
+        updatedProfile,
+        matchedProxy,
+        addedProxy,
+        noProxyInfo,
+      };
 
       // 2) reconcile deletions: profiles we recorded as created whose AdsPower
       //    id is no longer live were removed in AdsPower. Mark deleted and free
@@ -427,7 +443,7 @@ app.post("/api/bridge/jobs/:id/result", bridgeAuth, async (req, res) => {
     }
     await client.query(
       `update jobs set status=$1, result=$2, finished_at=now() where id=$3`,
-      [error ? "error" : "done", JSON.stringify({ results, error }), jobId]
+      [error ? "error" : "done", JSON.stringify({ results, error, summary: syncSummary }), jobId]
     );
     await client.query("commit");
     res.json({ ok: true });
