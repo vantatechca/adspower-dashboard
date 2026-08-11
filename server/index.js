@@ -37,6 +37,8 @@ function bridgeAuth(req, res, next) {
   setMeta("bridge_last_seen", Date.now()).catch(() => {});
   const host = req.header("x-bridge-host");
   if (host) setMeta("bridge_host", host).catch(() => {});
+  const version = req.header("x-bridge-version");
+  setMeta("bridge_version", version || "").catch(() => {});
   next();
 }
 
@@ -53,12 +55,17 @@ app.get("/api/health", (_req, res) =>
 
 app.get("/api/bridge/status", appAuth, async (_req, res) => {
   const { rows } = await q(
-    `select key, value from meta where key in ('bridge_last_seen','bridge_host')`
+    `select key, value from meta where key in ('bridge_last_seen','bridge_host','bridge_version')`
   );
   const m = Object.fromEntries(rows.map((r) => [r.key, r.value]));
   const last = m.bridge_last_seen ? +m.bridge_last_seen : 0;
   const online = last && Date.now() - last < 20000; // seen within 20s
-  res.json({ online: Boolean(online), lastSeen: last || null, host: m.bridge_host || null });
+  res.json({
+    online: Boolean(online),
+    lastSeen: last || null,
+    host: m.bridge_host || null,
+    version: m.bridge_version || null,
+  });
 });
 
 // ══ PROXIES ═════════════════════════════════════════════════════════
