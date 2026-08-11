@@ -35,10 +35,12 @@ function bridgeAuth(req, res, next) {
     return res.status(401).json({ error: "unauthorized bridge" });
   // heartbeat (fire and forget)
   setMeta("bridge_last_seen", Date.now()).catch(() => {});
-  const host = req.header("x-bridge-host");
-  if (host) setMeta("bridge_host", host).catch(() => {});
-  const version = req.header("x-bridge-version");
-  setMeta("bridge_version", version || "").catch(() => {});
+  const host = req.header("x-bridge-host") || "unknown";
+  const version = req.header("x-bridge-version") || "old";
+  setMeta("bridge_host", host).catch(() => {});
+  setMeta("bridge_version", version).catch(() => {});
+  // track each distinct (host,version) so the UI can reveal duplicate bridges
+  setMeta(`bridge_seen:${host}|${version}`, Date.now()).catch(() => {});
   next();
 }
 
@@ -54,17 +56,34 @@ app.get("/api/health", (_req, res) =>
 );
 
 app.get("/api/bridge/status", appAuth, async (_req, res) => {
+  const now = Date.now();
+  // prune bridge_seen rows not heard from in an hour (keeps the table tidy)
+  q(`delete from meta where key like 'bridge_seen:%' and value::bigint < $1`, [
+    now - 3600000,
+  ]).catch(() => {});
   const { rows } = await q(
-    `select key, value from meta where key in ('bridge_last_seen','bridge_host','bridge_version')`
+    `select key, value from meta where key like 'bridge_seen:%'`
   );
-  const m = Object.fromEntries(rows.map((r) => [r.key, r.value]));
-  const last = m.bridge_last_seen ? +m.bridge_last_seen : 0;
-  const online = last && Date.now() - last < 20000; // seen within 20s
+  const bridges = [];
+  for (const r of rows) {
+    const seen = +r.value || 0;
+    if (now - seen >= 20000) continue; // active = seen within 20s
+    const hv = r.key.slice("bridge_seen:".length);
+    const i = hv.lastIndexOf("|");
+    bridges.push({
+      host: i >= 0 ? hv.slice(0, i) : hv,
+      version: i >= 0 ? hv.slice(i + 1) : "old",
+      lastSeen: seen,
+    });
+  }
+  bridges.sort((a, b) => b.lastSeen - a.lastSeen);
+  const newest = bridges[0] || null;
   res.json({
-    online: Boolean(online),
-    lastSeen: last || null,
-    host: m.bridge_host || null,
-    version: m.bridge_version || null,
+    online: bridges.length > 0,
+    lastSeen: newest ? newest.lastSeen : null,
+    host: newest ? newest.host : null,
+    version: newest ? newest.version : null,
+    bridges,
   });
 });
 
