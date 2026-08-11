@@ -32,9 +32,12 @@ create table if not exists profiles (
   group_name       text default '',
   proxy_id         integer references proxies(id) on delete set null,
   adspower_user_id text default '',
+  os               text default '',          -- windows | macos (device family) when known
   status           text default 'planned',  -- planned | created | failed | deleted
   created_at       timestamptz default now()
 );
+-- add os to pre-existing installs that predate the column
+alter table profiles add column if not exists os text default '';
 
 create table if not exists jobs (
   id          serial primary key,

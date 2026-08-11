@@ -53,10 +53,10 @@ async function resolveGroupId(name) {
 // ── fingerprint randomisation ───────────────────────────────────────
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
-// realistic recent Chrome major versions to vary the UA / kernel
-const CHROME_VERSIONS = ["128", "129", "130", "131", "132", "133", "134", "135", "136"];
+// AdsPower ua_system_version values that pin a profile to an OS family.
+const OS_SYSTEM = { windows: "Windows", macos: "Mac OS X" };
 
-// OS-appropriate WebGL vendor/renderer pools (kept consistent with the UA's OS)
+// OS-appropriate WebGL vendor/renderer pools (kept consistent with the OS)
 const WEBGL = {
   windows: [
     { vendor: "Google Inc. (NVIDIA)", renderer: "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)" },
@@ -72,25 +72,23 @@ const WEBGL = {
   ],
 };
 
-function buildUa(os, version) {
-  if (os === "macos")
-    return `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${version}.0.0.0 Safari/537.36`;
-  return `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${version}.0.0.0 Safari/537.36`;
+// Resolve the batch OS setting to one concrete OS for a single profile.
+function resolveOs(os) {
+  if (os === "windows" || os === "macos") return os;
+  return pick(["windows", "macos"]); // "random" → mix Windows + Mac per profile
 }
 
-// Build a randomised fingerprint for one profile. `os` is windows|macos|random.
-function buildFingerprint(os) {
-  const resolvedOs = os === "random" ? pick(["windows", "macos"]) : os === "macos" ? "macos" : "windows";
-  const version = pick(CHROME_VERSIONS);
+// Build a randomised fingerprint pinned to `resolvedOs` (windows|macos).
+// Uses AdsPower's random_ua.ua_system_version to force the OS family and let
+// AdsPower randomise the browser version within it; WebGL metadata is set from
+// an OS-appropriate pool with image noise on.
+function buildFingerprint(resolvedOs) {
   const gl = pick(WEBGL[resolvedOs]);
   return {
     automatic_timezone: "1",
     language: ["en-US"],
     webrtc: "proxy",
-    ua: buildUa(resolvedOs, version),
-    // let AdsPower select a browser kernel matching the UA we set
-    browser_kernel_config: { version: "ua_auto", type: "chrome" },
-    // randomise WebGL metadata (Custom) + enable image noise
+    random_ua: { ua_system_version: [OS_SYSTEM[resolvedOs]] },
     webgl_image: "1",
     webgl_config: { webgl_vendor: gl.vendor, webgl_renderer: gl.renderer },
   };
@@ -105,6 +103,7 @@ async function runCreate(job) {
     const g = it.group || "";
     if (!(g in groupCache)) groupCache[g] = await resolveGroupId(g);
     const px = it.proxy || {};
+    const resolvedOs = resolveOs(os);
     const payload = {
       name: it.name,
       group_id: groupCache[g],
@@ -116,12 +115,12 @@ async function runCreate(job) {
         proxy_user: px.user || "",
         proxy_password: px.pass || "",
       },
-      fingerprint_config: buildFingerprint(os),
+      fingerprint_config: buildFingerprint(resolvedOs),
     };
     try {
       const r = await apPost("/api/v1/user/create", payload);
       if (r.code === 0)
-        results.push({ profile_id: it.profile_id, ok: true, adspower_user_id: r.data.id });
+        results.push({ profile_id: it.profile_id, ok: true, adspower_user_id: r.data.id, os: resolvedOs });
       else results.push({ profile_id: it.profile_id, ok: false, msg: r.msg });
     } catch (e) {
       results.push({ profile_id: it.profile_id, ok: false, msg: e.message });
