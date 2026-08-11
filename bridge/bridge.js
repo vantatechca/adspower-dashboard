@@ -112,6 +112,32 @@ async function runDelete(job) {
   return results;
 }
 
+async function runSync() {
+  const profiles = [];
+  let page = 1;
+  while (true) {
+    const res = await fetch(
+      `${AP}/api/v1/user/list?page=${page}&page_size=100`
+    ).then((r) => r.json());
+    const list = res?.data?.list || [];
+    if (!list.length) break;
+    for (const p of list) {
+      const cfg = p.user_proxy_config || {};
+      profiles.push({
+        adspower_user_id: p.user_id || "",
+        name: p.name || "",
+        group: p.group_name || "",
+        host: cfg.proxy_host || "",
+        port: cfg.proxy_port || "",
+      });
+    }
+    if (list.length < 100) break;
+    page++;
+    await sleep(AP_RATE);
+  }
+  return profiles;
+}
+
 async function tick() {
   let job;
   try {
@@ -125,10 +151,18 @@ async function tick() {
   console.log(`[job ${job.id}] ${job.type} — running`);
   try {
     const results =
-      job.type === "create" ? await runCreate(job) : await runDelete(job);
+      job.type === "create"
+        ? await runCreate(job)
+        : job.type === "delete"
+        ? await runDelete(job)
+        : await runSync(job);
     await cloud("POST", `/api/bridge/jobs/${job.id}/result`, { results });
-    const ok = results.filter((r) => r.ok).length;
-    console.log(`[job ${job.id}] done — ${ok}/${results.length} ok`);
+    if (job.type === "sync") {
+      console.log(`[job ${job.id}] sync done — ${results.length} profiles`);
+    } else {
+      const ok = results.filter((r) => r.ok).length;
+      console.log(`[job ${job.id}] done — ${ok}/${results.length} ok`);
+    }
   } catch (e) {
     await cloud("POST", `/api/bridge/jobs/${job.id}/result`, {
       results: [],

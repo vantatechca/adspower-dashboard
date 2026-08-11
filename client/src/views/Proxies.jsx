@@ -9,6 +9,8 @@ export default function Proxies() {
   const [source, setSource] = useState("");
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState(null);
   const fileRef = useRef();
 
   async function refresh() {
@@ -52,6 +54,36 @@ export default function Proxies() {
     refresh();
   }
 
+  async function sync() {
+    setSyncing(true);
+    setSyncMsg("Queued — waiting for the bridge…");
+    try {
+      const { job_id } = await api.sync();
+      let done = false;
+      for (let i = 0; i < 40 && !done; i++) {
+        await new Promise((r) => setTimeout(r, 3000));
+        const jobs = await api.jobs();
+        const j = jobs.find((x) => x.id === job_id);
+        if (!j) continue;
+        if (j.status === "done") {
+          setSyncMsg("Synced with AdsPower — counts updated.");
+          done = true;
+        } else if (j.status === "error") {
+          setSyncMsg("Sync error — is the bridge online?");
+          done = true;
+        } else if (j.status === "pending" && i > 4) {
+          setSyncMsg("Bridge hasn't picked it up — check it's online.");
+        } else {
+          setSyncMsg("Fetching profiles from AdsPower…");
+        }
+      }
+      refresh();
+    } catch (e) {
+      setSyncMsg("Error: " + e.message);
+    }
+    setSyncing(false);
+  }
+
   return (
     <>
       <div className="card">
@@ -91,16 +123,33 @@ export default function Proxies() {
       </div>
 
       <div className="card">
-        <div style={{ marginBottom: 16 }}>
-          <span className="stat">
-            <b className="tag-ok">{stats.unused}</b>
-            <span>unused</span>
-          </span>
-          <span className="stat">
-            <b>{stats.used}</b>
-            <span>used</span>
-          </span>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 16,
+          }}
+        >
+          <div>
+            <span className="stat">
+              <b className="tag-ok">{stats.unused}</b>
+              <span>unused</span>
+            </span>
+            <span className="stat">
+              <b>{stats.used}</b>
+              <span>used</span>
+            </span>
+          </div>
+          <button className="ghost" onClick={sync} disabled={syncing}>
+            {syncing ? "Fetching…" : "Fetch from AdsPower"}
+          </button>
         </div>
+        {syncMsg && (
+          <div className="out" style={{ marginTop: 0, marginBottom: 8 }}>
+            {syncMsg}
+          </div>
+        )}
 
         <div className="tabs" style={{ marginBottom: 14 }}>
           {["unused", "used"].map((v) => (

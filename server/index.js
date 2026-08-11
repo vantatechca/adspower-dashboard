@@ -243,6 +243,14 @@ app.post("/api/profiles/delete", appAuth, async (req, res) => {
   res.json({ ok: true, job_id: job.id, queued: rows.length });
 });
 
+// enqueue a sync job (bridge pulls AdsPower's real profile list to reconcile)
+app.post("/api/profiles/sync", appAuth, async (_req, res) => {
+  const job = (
+    await q(`insert into jobs (type, payload) values ('sync', '{}') returning id`)
+  ).rows[0];
+  res.json({ ok: true, job_id: job.id });
+});
+
 // ══ JOBS (UI view) ══════════════════════════════════════════════════
 app.get("/api/jobs", appAuth, async (_req, res) => {
   const { rows } = await q(
@@ -322,6 +330,56 @@ app.post("/api/bridge/jobs/:id/result", bridgeAuth, async (req, res) => {
           await client.query(
             `update profiles set status='deleted' where id=$1`,
             [r.profile_id]
+          );
+        }
+      }
+    } else if (job.type === "sync") {
+      // results = live AdsPower profiles [{adspower_user_id, name, group, host, port}]
+      const live = results || [];
+      const liveKeys = new Set(live.map((p) => `${p.host}:${p.port}`));
+
+      // 1) mark matched proxies used + record/refresh their profile row
+      for (const p of live) {
+        if (!p.host || !p.port) continue;
+        const px = (
+          await client.query(
+            `select id from proxies where host=$1 and port=$2
+             order by (status='unused') desc limit 1`,
+            [p.host, p.port]
+          )
+        ).rows[0];
+        if (!px) continue; // proxy not in our inventory
+        await client.query(`update proxies set status='used' where id=$1`, [px.id]);
+        const prof = (
+          await client.query(
+            `select id from profiles where proxy_id=$1 and status='created' limit 1`,
+            [px.id]
+          )
+        ).rows[0];
+        if (prof) {
+          await client.query(
+            `update profiles set adspower_user_id=$1, name=$2, group_name=$3 where id=$4`,
+            [p.adspower_user_id || "", p.name || "", p.group || "", prof.id]
+          );
+        } else {
+          await client.query(
+            `insert into profiles (name, group_name, proxy_id, adspower_user_id, status)
+             values ($1,$2,$3,$4,'created')`,
+            [p.name || "", p.group || "", px.id, p.adspower_user_id || ""]
+          );
+        }
+      }
+
+      // 2) free proxies marked used in DB but no longer live in AdsPower
+      const used = (
+        await client.query(`select id, host, port from proxies where status='used'`)
+      ).rows;
+      for (const u of used) {
+        if (!liveKeys.has(`${u.host}:${u.port}`)) {
+          await client.query(`update proxies set status='unused' where id=$1`, [u.id]);
+          await client.query(
+            `update profiles set status='deleted' where proxy_id=$1 and status='created'`,
+            [u.id]
           );
         }
       }

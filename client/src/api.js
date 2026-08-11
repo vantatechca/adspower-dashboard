@@ -30,6 +30,7 @@ export const api = {
   proxies: (status) => req("GET", `/api/proxies?status=${status}`),
   upload: (text, source) => req("POST", "/api/proxies/upload", { text, source }),
   suggest: (count) => req("POST", "/api/proxies/suggest", { count }),
+  sync: () => req("POST", "/api/profiles/sync"),
   delProxy: (id) => req("DELETE", `/api/proxies/${id}`),
   plan: (b) => req("POST", "/api/profiles/plan", b),
   profiles: () => req("GET", "/api/profiles"),
