@@ -50,8 +50,55 @@ async function resolveGroupId(name) {
   return made?.data?.group_id || "0";
 }
 
+// ── fingerprint randomisation ───────────────────────────────────────
+const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
+// realistic recent Chrome major versions to vary the UA / kernel
+const CHROME_VERSIONS = ["128", "129", "130", "131", "132", "133", "134", "135", "136"];
+
+// OS-appropriate WebGL vendor/renderer pools (kept consistent with the UA's OS)
+const WEBGL = {
+  windows: [
+    { vendor: "Google Inc. (NVIDIA)", renderer: "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)" },
+    { vendor: "Google Inc. (NVIDIA)", renderer: "ANGLE (NVIDIA, NVIDIA GeForce GTX 1660 Direct3D11 vs_5_0 ps_5_0, D3D11)" },
+    { vendor: "Google Inc. (Intel)", renderer: "ANGLE (Intel, Intel(R) UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0, D3D11)" },
+    { vendor: "Google Inc. (AMD)", renderer: "ANGLE (AMD, AMD Radeon(TM) RX 580 Direct3D11 vs_5_0 ps_5_0, D3D11)" },
+  ],
+  macos: [
+    { vendor: "Google Inc. (Apple)", renderer: "ANGLE (Apple, Apple M1, OpenGL 4.1 Metal - 76.3)" },
+    { vendor: "Google Inc. (Apple)", renderer: "ANGLE (Apple, Apple M2, OpenGL 4.1 Metal - 83)" },
+    { vendor: "Google Inc. (Apple)", renderer: "ANGLE (Apple, Apple M1 Pro, OpenGL 4.1 Metal - 76.3)" },
+    { vendor: "Apple Inc.", renderer: "Apple GPU" },
+  ],
+};
+
+function buildUa(os, version) {
+  if (os === "macos")
+    return `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${version}.0.0.0 Safari/537.36`;
+  return `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${version}.0.0.0 Safari/537.36`;
+}
+
+// Build a randomised fingerprint for one profile. `os` is windows|macos|random.
+function buildFingerprint(os) {
+  const resolvedOs = os === "random" ? pick(["windows", "macos"]) : os === "macos" ? "macos" : "windows";
+  const version = pick(CHROME_VERSIONS);
+  const gl = pick(WEBGL[resolvedOs]);
+  return {
+    automatic_timezone: "1",
+    language: ["en-US"],
+    webrtc: "proxy",
+    ua: buildUa(resolvedOs, version),
+    // let AdsPower select a browser kernel matching the UA we set
+    browser_kernel_config: { version: "ua_auto", type: "chrome" },
+    // randomise WebGL metadata (Custom) + enable image noise
+    webgl_image: "1",
+    webgl_config: { webgl_vendor: gl.vendor, webgl_renderer: gl.renderer },
+  };
+}
+
 async function runCreate(job) {
   const items = job.payload.items || [];
+  const os = job.payload.os || "random"; // windows | macos | random
   const results = [];
   const groupCache = {};
   for (const it of items) {
@@ -69,11 +116,7 @@ async function runCreate(job) {
         proxy_user: px.user || "",
         proxy_password: px.pass || "",
       },
-      fingerprint_config: {
-        automatic_timezone: "1",
-        language: ["en-US"],
-        webrtc: "proxy",
-      },
+      fingerprint_config: buildFingerprint(os),
     };
     try {
       const r = await apPost("/api/v1/user/create", payload);

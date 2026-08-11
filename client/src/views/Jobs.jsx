@@ -46,16 +46,34 @@ export default function Jobs() {
       <div className="card">
         <p className="eyebrow">03 / fleet</p>
         <h2>Profiles</h2>
-        <div style={{ marginBottom: 12 }}>
+        <div style={{ marginBottom: 12, display: "flex", gap: 8, alignItems: "center" }}>
           <a href={api.exportUrl()} target="_blank" rel="noreferrer">
             <button className="ghost">Export CSV</button>
           </a>
+          <button className="ghost" onClick={() => setSel(new Set(created.map((p) => p.id)))}>
+            Select all created ({created.length})
+          </button>
+          {sel.size > 0 && (
+            <button className="ghost" onClick={() => setSel(new Set())}>
+              Clear selection
+            </button>
+          )}
         </div>
         <div className="scroll">
           <table>
             <thead>
               <tr>
-                <th></th>
+                <th>
+                  <input
+                    type="checkbox"
+                    title="Select all created"
+                    checked={created.length > 0 && sel.size === created.length}
+                    onChange={(e) =>
+                      setSel(e.target.checked ? new Set(created.map((p) => p.id)) : new Set())
+                    }
+                    style={{ width: "auto" }}
+                  />
+                </th>
                 <th>Name</th>
                 <th>Group</th>
                 <th>Proxy</th>

@@ -156,10 +156,11 @@ app.delete("/api/proxies/:id", appAuth, async (req, res) => {
 
 // ══ PROFILES / PLAN ═════════════════════════════════════════════════
 app.post("/api/profiles/plan", appAuth, async (req, res) => {
-  const { prefix = "Profile", start = 1, group = "", proxy_ids = [] } =
+  const { prefix = "Profile", start = 1, group = "", proxy_ids = [], os = "random" } =
     req.body || {};
   if (!proxy_ids.length)
     return res.status(400).json({ error: "no proxies selected" });
+  const osChoice = ["windows", "macos", "random"].includes(os) ? os : "random";
 
   const client = await pool.connect();
   try {
@@ -206,7 +207,7 @@ app.post("/api/profiles/plan", appAuth, async (req, res) => {
     const job = (
       await client.query(
         `insert into jobs (type, payload) values ('create', $1) returning id`,
-        [JSON.stringify({ items })]
+        [JSON.stringify({ items, os: osChoice })]
       )
     ).rows[0];
     await client.query("commit");
