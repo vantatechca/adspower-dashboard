@@ -182,6 +182,9 @@ app.post("/api/profiles/plan", appAuth, async (req, res) => {
           [name, group, pid]
         )
       ).rows[0];
+      // reserve the proxy so it can't be queued into a second job before the
+      // bridge runs; reverted to 'unused' if the AdsPower create later fails.
+      await client.query(`update proxies set status='used' where id=$1`, [pid]);
       items.push({
         profile_id: prof.id,
         name,
@@ -317,6 +320,12 @@ app.post("/api/bridge/jobs/:id/result", bridgeAuth, async (req, res) => {
             `update profiles set status='failed' where id=$1`,
             [r.profile_id]
           );
+          // create failed — release the reserved proxy back to the pool
+          await client.query(
+            `update proxies set status='unused'
+             where id = (select proxy_id from profiles where id=$1)`,
+            [r.profile_id]
+          );
         }
       }
     } else if (job.type === "delete") {
@@ -376,6 +385,15 @@ app.post("/api/bridge/jobs/:id/result", bridgeAuth, async (req, res) => {
       ).rows;
       for (const u of used) {
         if (!liveKeys.has(`${u.host}:${u.port}`)) {
+          // skip proxies still reserved by a not-yet-created (planned) profile —
+          // the bridge just hasn't run that create job yet.
+          const pending = (
+            await client.query(
+              `select 1 from profiles where proxy_id=$1 and status='planned' limit 1`,
+              [u.id]
+            )
+          ).rows[0];
+          if (pending) continue;
           await client.query(`update proxies set status='unused' where id=$1`, [u.id]);
           await client.query(
             `update profiles set status='deleted' where proxy_id=$1 and status='created'`,
@@ -405,10 +423,11 @@ app.get("/api/export.csv", appAuth, async (_req, res) => {
      from profiles pr join proxies p on p.id = pr.proxy_id
      where pr.status = 'created' order by pr.name`
   );
+  const csv = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
   const lines = ["Name,Group,Proxy host:port"];
   for (const r of rows)
     lines.push(
-      `"${r.name}","${r.group_name || ""}","${r.host}:${r.port}"`
+      [csv(r.name), csv(r.group_name || ""), csv(`${r.host}:${r.port}`)].join(",")
     );
   res.setHeader("Content-Type", "text/csv");
   res.setHeader("Content-Disposition", "attachment; filename=adspower_profiles.csv");
