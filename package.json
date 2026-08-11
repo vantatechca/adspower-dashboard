@@ -1,0 +1,22 @@
+{
+  "name": "adspower-console",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Cloud brain for AdsPower profile + proxy management (React + Express + Postgres).",
+  "scripts": {
+    "build": "npm install && npm --prefix client install && npm --prefix client run build",
+    "start": "node server/index.js",
+    "server": "node server/index.js",
+    "dev:client": "npm --prefix client run dev"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "pg": "^8.13.1"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

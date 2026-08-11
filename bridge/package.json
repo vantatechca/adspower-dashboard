@@ -1,0 +1,12 @@
+{
+  "name": "adspower-bridge",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Local agent: polls the cloud for jobs and runs them against the AdsPower Local API.",
+  "scripts": {
+    "start": "node bridge.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5"
+  }
+}

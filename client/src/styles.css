@@ -1,0 +1,103 @@
+:root {
+  --bg: #0e1116;
+  --panel: #161b22;
+  --line: #232a34;
+  --ink: #d7dde5;
+  --muted: #7d8794;
+  --accent: #22d3ee;
+  --accent-dim: #0e7490;
+  --ok: #3fb950;
+  --bad: #f85149;
+  --warn: #d29922;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --sans: "Inter", system-ui, -apple-system, sans-serif;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.wrap { max-width: 1040px; margin: 0 auto; padding: 28px 20px 80px; }
+header {
+  display: flex; align-items: baseline; justify-content: space-between;
+  border-bottom: 1px solid var(--line); padding-bottom: 14px; margin-bottom: 22px;
+}
+h1 { font-size: 18px; font-weight: 600; letter-spacing: .02em; margin: 0; }
+h1 span { color: var(--accent); }
+.badge { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.badge b { padding: 2px 8px; border-radius: 999px; font-weight: 600; margin-left: 6px; }
+.up { background: rgba(63,185,80,.12); color: var(--ok); }
+.down { background: rgba(248,81,73,.12); color: var(--bad); }
+
+.tabs { display: flex; gap: 6px; margin-bottom: 22px; }
+.tab {
+  background: transparent; border: 1px solid var(--line); color: var(--muted);
+  padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 13px;
+  font-family: var(--sans);
+}
+.tab.active { color: var(--accent); border-color: var(--accent-dim); background: rgba(34,211,238,.06); }
+
+.card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  padding: 20px; margin-bottom: 18px;
+}
+.card.risk { border-color: rgba(248,81,73,.35); }
+.eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--muted); margin: 0 0 4px;
+}
+h2 { font-size: 15px; font-weight: 600; margin: 0 0 16px; }
+
+label { display: block; font-size: 12px; color: var(--muted); margin: 0 0 6px; }
+input, select, textarea {
+  width: 100%; background: var(--bg); border: 1px solid var(--line);
+  color: var(--ink); border-radius: 6px; padding: 9px 10px;
+  font-family: var(--mono); font-size: 13px;
+}
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent-dim); }
+textarea { resize: vertical; min-height: 110px; }
+.row { display: flex; gap: 12px; flex-wrap: wrap; }
+.row > div { flex: 1; min-width: 120px; }
+.field { margin-bottom: 14px; }
+
+button {
+  background: var(--accent); color: #04222a; border: 0; border-radius: 6px;
+  padding: 10px 16px; font-weight: 600; font-size: 14px; cursor: pointer;
+  font-family: var(--sans);
+}
+button:hover { background: #67e8f9; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+.ghost { background: transparent; color: var(--accent); border: 1px solid var(--accent-dim); }
+.ghost:hover { background: rgba(34,211,238,.08); }
+.danger { background: var(--bad); color: #fff; }
+.danger:hover { background: #ff6b63; }
+
+.hint { font-size: 11px; color: var(--muted); margin-top: 8px; font-family: var(--mono); }
+.stat { display: inline-flex; gap: 6px; align-items: baseline; margin-right: 20px; }
+.stat b { font-size: 22px; font-family: var(--mono); }
+.stat span { font-size: 12px; color: var(--muted); }
+
+table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 12px; }
+th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); }
+th { color: var(--muted); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+tr:hover td { background: rgba(255,255,255,.02); }
+.scroll { max-height: 380px; overflow: auto; }
+
+.tag-ok { color: var(--ok); } .tag-bad { color: var(--bad); } .tag-warn { color: var(--warn); }
+.pill { padding: 1px 7px; border-radius: 999px; font-size: 11px; }
+.pill.unused { background: rgba(34,211,238,.12); color: var(--accent); }
+.pill.used { background: rgba(125,135,148,.15); color: var(--muted); }
+.pill.created { background: rgba(63,185,80,.12); color: var(--ok); }
+.pill.planned { background: rgba(210,153,34,.12); color: var(--warn); }
+.pill.failed, .pill.deleted { background: rgba(248,81,73,.12); color: var(--bad); }
+
+.out {
+  margin-top: 14px; font-family: var(--mono); font-size: 12px;
+  border-top: 1px solid var(--line); padding-top: 10px;
+}
+.center { min-height: 100vh; display: grid; place-items: center; }
+.gate { width: 340px; }

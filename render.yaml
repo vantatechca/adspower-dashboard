@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: adspower-console
+    runtime: node
+    plan: free
+    buildCommand: npm run build
+    startCommand: npm start
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: adspower-db
+          property: connectionString
+      - key: APP_TOKEN
+        generateValue: true      # gates the UI-facing API
+      - key: BRIDGE_TOKEN
+        generateValue: true      # gates the local bridge endpoints
+      - key: ANTHROPIC_API_KEY
+        sync: false              # optional — set manually to enable AI parse fallback
+      - key: ANTHROPIC_MODEL
+        value: claude-haiku-4-5-20251001
+
+databases:
+  - name: adspower-db
+    plan: free
