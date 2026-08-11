@@ -309,8 +309,8 @@ app.post("/api/bridge/jobs/:id/result", bridgeAuth, async (req, res) => {
       for (const r of results) {
         if (r.ok) {
           await client.query(
-            `update profiles set status='created', adspower_user_id=$1 where id=$2`,
-            [r.adspower_user_id || "", r.profile_id]
+            `update profiles set status='created', adspower_user_id=$1, os=coalesce($2, os) where id=$3`,
+            [r.adspower_user_id || "", r.os || null, r.profile_id]
           );
           await client.query(
             `update proxies set status='used'
@@ -483,15 +483,16 @@ app.post("/api/bridge/jobs/:id/result", bridgeAuth, async (req, res) => {
 // ══ EXPORT ══════════════════════════════════════════════════════════
 app.get("/api/export.csv", appAuth, async (_req, res) => {
   const { rows } = await q(
-    `select pr.name, pr.group_name, p.host, p.port
+    `select pr.name, pr.group_name, pr.os, p.host, p.port
      from profiles pr join proxies p on p.id = pr.proxy_id
      where pr.status = 'created' order by pr.name`
   );
   const csv = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-  const lines = ["Name,Group,Proxy host:port"];
+  const osLabel = { windows: "Windows", macos: "macOS" };
+  const lines = ["Name,Group,Device,Proxy host:port"];
   for (const r of rows)
     lines.push(
-      [csv(r.name), csv(r.group_name || ""), csv(`${r.host}:${r.port}`)].join(",")
+      [csv(r.name), csv(r.group_name || ""), csv(osLabel[r.os] || ""), csv(`${r.host}:${r.port}`)].join(",")
     );
   res.setHeader("Content-Type", "text/csv");
   res.setHeader("Content-Disposition", "attachment; filename=adspower_profiles.csv");

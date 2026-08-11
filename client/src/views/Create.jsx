@@ -11,13 +11,29 @@ export default function Create() {
   const [count, setCount] = useState(10);
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [takenNames, setTakenNames] = useState(new Set());
 
   async function loadPool() {
     setPool(await api.proxies("unused"));
+    try {
+      const rows = await api.profiles();
+      // names already in use by live (non-deleted) profiles
+      setTakenNames(
+        new Set(rows.filter((p) => p.status !== "deleted").map((p) => p.name))
+      );
+    } catch (e) {
+      /* ignore — warning is best-effort */
+    }
   }
   useEffect(() => {
     loadPool();
   }, []);
+
+  // names this batch would create, and how many collide with existing profiles
+  const plannedNames = Array.from({ length: selected.size }, (_, i) =>
+    `${prefix} ${+start + i}`.trim()
+  );
+  const dupCount = plannedNames.filter((n) => takenNames.has(n)).length;
 
   function toggle(id) {
     setSelected((s) => {
@@ -121,6 +137,26 @@ export default function Create() {
           </div>
         </div>
 
+        {selected.size > 0 && (
+          <p className="hint" style={{ marginTop: 0 }}>
+            Will name them{" "}
+            <b style={{ fontFamily: "var(--mono)" }}>
+              {`${prefix} ${+start}`.trim()}
+            </b>{" "}
+            …{" "}
+            <b style={{ fontFamily: "var(--mono)" }}>
+              {`${prefix} ${+start + selected.size - 1}`.trim()}
+            </b>
+            .
+          </p>
+        )}
+        {dupCount > 0 && (
+          <div className="out" style={{ borderColor: "var(--bad, #e5484d)" }}>
+            ⚠ {dupCount} of these name(s) already exist on live profiles (e.g.{" "}
+            {plannedNames.find((n) => takenNames.has(n))}). Change the prefix or the start
+            number to avoid duplicates.
+          </div>
+        )}
         <button onClick={plan} disabled={busy || !selected.size}>
           {busy ? "…" : `Plan & queue ${selected.size} profiles`}
         </button>

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api, setToken, getToken } from "./api.js";
 import Proxies from "./views/Proxies.jsx";
 import Create from "./views/Create.jsx";
+import Fleet from "./views/Fleet.jsx";
 import Jobs from "./views/Jobs.jsx";
 
 export default function App() {
@@ -92,7 +93,7 @@ export default function App() {
       </header>
 
       <div className="tabs">
-        {["proxies", "create", "jobs"].map((t) => (
+        {["proxies", "create", "profiles", "jobs"].map((t) => (
           <button
             key={t}
             className={"tab" + (tab === t ? " active" : "")}
@@ -105,6 +106,7 @@ export default function App() {
 
       {tab === "proxies" && <Proxies />}
       {tab === "create" && <Create />}
+      {tab === "profiles" && <Fleet />}
       {tab === "jobs" && <Jobs />}
     </div>
   );
