@@ -7,6 +7,7 @@ export default function Create() {
   const [prefix, setPrefix] = useState("Profile");
   const [start, setStart] = useState(1);
   const [group, setGroup] = useState("");
+  const [os, setOs] = useState("random");
   const [count, setCount] = useState(10);
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -43,7 +44,7 @@ export default function Create() {
     setBusy(true);
     setMsg("Queuing…");
     try {
-      const r = await api.plan({ prefix, start: +start, group, proxy_ids: ids });
+      const r = await api.plan({ prefix, start: +start, group, os, proxy_ids: ids });
       setMsg(
         `Queued job #${r.job_id} — ${r.planned} profiles planned. Run the local bridge to create them in AdsPower.`
       );
@@ -77,6 +78,23 @@ export default function Create() {
               onChange={(e) => setGroup(e.target.value)}
               placeholder="blank = ungrouped"
             />
+          </div>
+        </div>
+
+        <div className="row field">
+          <div style={{ flex: "0 0 220px" }}>
+            <label>Operating system</label>
+            <select value={os} onChange={(e) => setOs(e.target.value)}>
+              <option value="random">Random (mix Win + Mac)</option>
+              <option value="windows">Windows</option>
+              <option value="macos">macOS</option>
+            </select>
+          </div>
+          <div style={{ flex: 1, alignSelf: "flex-end" }}>
+            <span style={{ color: "var(--muted)", fontSize: 12 }}>
+              User-agent, Chrome kernel & WebGL vendor/renderer are randomized per
+              profile to match the chosen OS.
+            </span>
           </div>
         </div>
 
