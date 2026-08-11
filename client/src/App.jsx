@@ -85,9 +85,20 @@ export default function App() {
             <b className={bridge.online ? "up" : "down"}>
               {bridge.online ? "online" : "offline"}
             </b>
-            {bridge.version && (
+            {bridge.bridges && bridge.bridges.length === 1 && (
               <span style={{ marginLeft: 6, color: "var(--muted)", fontSize: 11 }}>
-                ({bridge.version})
+                ({bridge.bridges[0].version})
+              </span>
+            )}
+            {bridge.bridges && bridge.bridges.length > 1 && (
+              <span
+                style={{ marginLeft: 6, color: "var(--bad, #e5484d)", fontSize: 11 }}
+                title={bridge.bridges
+                  .map((b) => `${b.host} — ${b.version}`)
+                  .join("\n")}
+              >
+                ⚠ {bridge.bridges.length} bridges running:{" "}
+                {bridge.bridges.map((b) => b.version).join(", ")} — stop the old one
               </span>
             )}
           </span>
