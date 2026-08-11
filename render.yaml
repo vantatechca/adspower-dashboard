@@ -2,7 +2,7 @@ services:
   - type: web
     name: adspower-console
     runtime: node
-    plan: free
+    plan: starter
     buildCommand: npm run build
     startCommand: npm start
     envVars:
@@ -21,4 +21,4 @@ services:
 
 databases:
   - name: adspower-db
-    plan: free
+    plan: starter

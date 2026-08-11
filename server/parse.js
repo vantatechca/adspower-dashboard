@@ -56,8 +56,12 @@ export function parseLine(raw) {
   line = rest;
 
   // Form with '@' : credentials on one side, endpoint on the other.
+  // Split on the LAST '@' so a password containing '@' isn't torn apart
+  // in the common `user:pass@host:port` shape.
   if (line.includes("@")) {
-    const [left, right] = line.split("@");
+    const at = line.lastIndexOf("@");
+    const left = line.slice(0, at);
+    const right = line.slice(at + 1);
     const l = left.split(/[:]/);
     const r = right.split(/[:]/);
     // endpoint is whichever side has a valid port
