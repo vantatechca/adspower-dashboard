@@ -35,18 +35,37 @@ npm start
 
 Keep AdsPower open with the Local API enabled. The bridge logs each job it runs.
 
-### Keep the bridge always-on (set once, forget)
+### Run it hidden + automatic (Windows — easiest)
 
-So you never have to touch it, run the bridge as a background service on the AdsPower
-machine:
+You don't have to start it by hand or keep a window open. In the `bridge` folder:
 
-- **Windows:** use [NSSM](https://nssm.cc/) — `nssm install AdsPowerBridge` and point it at
-  `node` with argument `bridge.js`, working dir = the `bridge` folder. Or add it to Task
-  Scheduler "At log on."
+1. Copy `.env.example` to `.env` and fill in `CLOUD_URL` and `BRIDGE_TOKEN`.
+2. Double-click **`install-bridge-autostart.bat`**.
+
+That installs dependencies, registers a hidden "run at login" task, and starts the bridge
+right away with no visible window. From then on it launches itself silently every time the
+machine logs in. To undo it, double-click `stop-bridge-autostart.bat`.
+
+Two things it depends on:
+- **Node.js 18+** must be installed (https://nodejs.org). The installer checks for it.
+- **AdsPower must be running** whenever you want jobs to execute — the bridge talks to
+  AdsPower's Local API, which only answers while the app is open. Set AdsPower to launch on
+  startup too, so both come up together. Queued jobs simply wait until AdsPower is up.
+
+The web UI header shows **bridge online/offline**, so you can confirm from anywhere that the
+machine is up and connected — no need to open the box.
+
+### Alternatives (auto-restart on crash, or run as a true service)
+
 - **pm2 (any OS):** `npm i -g pm2 && pm2 start bridge.js --name adspower-bridge && pm2 save`.
+- **NSSM (Windows service):** `nssm install AdsPowerBridge` pointing `node` at `bridge.js`.
 
-The web UI header shows **bridge online/offline** so you can confirm from anywhere that the
-machine is up and connected — no need to check the box itself.
+These add automatic restart if the process ever crashes. The bridge already retries on
+network/AdsPower errors, so the login task above is enough for most setups.
+
+### macOS
+
+Use `pm2` (above) with `pm2 startup`, or a LaunchAgent plist that runs `node bridge.js`.
 
 ## Flow
 
