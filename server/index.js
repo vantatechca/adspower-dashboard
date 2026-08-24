@@ -153,6 +153,15 @@ app.get("/api/proxies/stats", appAuth, async (_req, res) => {
   res.json(stats);
 });
 
+// distinct upload sources among unused proxies, for filtering pickers
+app.get("/api/proxies/sources", appAuth, async (_req, res) => {
+  const { rows } = await q(
+    `select source, count(*)::int as n from proxies
+     where status = 'unused' and source <> '' group by source order by n desc`
+  );
+  res.json(rows);
+});
+
 // smart suggestion: subnet-diverse unused proxies
 app.post("/api/proxies/suggest", appAuth, async (req, res) => {
   const count = Math.max(1, Math.min(500, +(req.body?.count || 10)));
@@ -267,6 +276,7 @@ app.post("/api/profiles/reassign-proxy", appAuth, async (req, res) => {
   const names = [
     ...new Set((req.body?.names || []).map((n) => String(n).trim()).filter(Boolean)),
   ];
+  const source = String(req.body?.source || "").trim();
   if (!names.length) return res.status(400).json({ error: "no profile names" });
 
   const client = await pool.connect();
@@ -288,8 +298,12 @@ app.post("/api/profiles/reassign-proxy", appAuth, async (req, res) => {
     for (const prof of found) {
       const px = (
         await client.query(
-          `select * from proxies where status = 'unused'
-           order by created_at asc limit 1 for update skip locked`
+          source
+            ? `select * from proxies where status = 'unused' and source = $1
+               order by created_at asc limit 1 for update skip locked`
+            : `select * from proxies where status = 'unused'
+               order by created_at asc limit 1 for update skip locked`,
+          source ? [source] : []
         )
       ).rows[0];
       if (!px) {
@@ -316,7 +330,9 @@ app.post("/api/profiles/reassign-proxy", appAuth, async (req, res) => {
     if (!items.length) {
       await client.query("rollback");
       return res.status(400).json({
-        error: "no matching profiles with an unused proxy available",
+        error: source
+          ? `no matching profiles with an unused proxy available from source "${source}"`
+          : "no matching profiles with an unused proxy available",
         notFound,
         skipped,
       });
