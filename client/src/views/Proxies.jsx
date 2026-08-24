@@ -17,6 +17,8 @@ export default function Proxies() {
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState(null);
   const [copiedId, setCopiedId] = useState(null);
+  const [sel, setSel] = useState(new Set());
+  const [delBusy, setDelBusy] = useState(false);
   const fileRef = useRef();
 
   function copyAddr(id, addr) {
@@ -26,11 +28,20 @@ export default function Proxies() {
     });
   }
 
+  function toggleSel(id) {
+    setSel((s) => {
+      const n = new Set(s);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return n;
+    });
+  }
+
   async function refresh() {
     setStats(await api.stats());
     setRows(await api.proxies(view));
   }
   useEffect(() => {
+    setSel(new Set());
     refresh();
   }, [view]);
 
@@ -65,6 +76,20 @@ export default function Proxies() {
   async function del(id) {
     await api.delProxy(id);
     refresh();
+  }
+
+  async function delSelected() {
+    if (!sel.size) return;
+    if (!confirm(`Delete ${sel.size} selected proxy/proxies? This can't be undone.`)) return;
+    setDelBusy(true);
+    try {
+      await api.delProxiesBatch([...sel]);
+      setSel(new Set());
+      refresh();
+    } catch (e) {
+      setMsg("Error: " + e.message);
+    }
+    setDelBusy(false);
   }
 
   async function sync() {
@@ -184,16 +209,26 @@ export default function Proxies() {
           </div>
         )}
 
-        <div className="tabs" style={{ marginBottom: 14 }}>
-          {["unused", "used", "failed"].map((v) => (
-            <button
-              key={v}
-              className={"tab" + (view === v ? " active" : "")}
-              onClick={() => setView(v)}
-            >
-              {v}
+        <div
+          className="tabs"
+          style={{ marginBottom: 14, justifyContent: "space-between", display: "flex" }}
+        >
+          <div className="tabs" style={{ marginBottom: 0 }}>
+            {["unused", "used", "failed"].map((v) => (
+              <button
+                key={v}
+                className={"tab" + (view === v ? " active" : "")}
+                onClick={() => setView(v)}
+              >
+                {v}
+              </button>
+            ))}
+          </div>
+          {view !== "used" && sel.size > 0 && (
+            <button className="danger" onClick={delSelected} disabled={delBusy}>
+              {delBusy ? "Deleting…" : `Delete selected (${sel.size})`}
             </button>
-          ))}
+          )}
         </div>
 
         <div className="scroll">
@@ -201,6 +236,17 @@ export default function Proxies() {
             <thead>
               {view === "unused" && (
                 <tr>
+                  <th>
+                    <input
+                      type="checkbox"
+                      title="Select all"
+                      checked={rows.length > 0 && sel.size === rows.length}
+                      onChange={(e) =>
+                        setSel(e.target.checked ? new Set(rows.map((p) => p.id)) : new Set())
+                      }
+                      style={{ width: "auto" }}
+                    />
+                  </th>
                   <th>Address</th>
                   <th>Type</th>
                   <th>Source</th>
@@ -218,6 +264,17 @@ export default function Proxies() {
               )}
               {view === "failed" && (
                 <tr>
+                  <th>
+                    <input
+                      type="checkbox"
+                      title="Select all"
+                      checked={rows.length > 0 && sel.size === rows.length}
+                      onChange={(e) =>
+                        setSel(e.target.checked ? new Set(rows.map((p) => p.id)) : new Set())
+                      }
+                      style={{ width: "auto" }}
+                    />
+                  </th>
                   <th>Address</th>
                   <th>Type</th>
                   <th>Source</th>
@@ -245,9 +302,20 @@ export default function Proxies() {
                     {p.fail_count > 0 ? p.fail_count : "—"}
                   </td>
                 );
+                const checkCell = (
+                  <td>
+                    <input
+                      type="checkbox"
+                      checked={sel.has(p.id)}
+                      onChange={() => toggleSel(p.id)}
+                      style={{ width: "auto" }}
+                    />
+                  </td>
+                );
                 if (view === "unused")
                   return (
                     <tr key={p.id}>
+                      {checkCell}
                       {addrCell}
                       <td>{p.proxy_type}</td>
                       <td className="tag-warn">{p.source || "—"}</td>
@@ -274,6 +342,7 @@ export default function Proxies() {
                   );
                 return (
                   <tr key={p.id}>
+                    {checkCell}
                     {addrCell}
                     <td>{p.proxy_type}</td>
                     <td className="tag-warn">{p.source || "—"}</td>
@@ -300,7 +369,7 @@ export default function Proxies() {
               })}
               {!rows.length && (
                 <tr>
-                  <td colSpan={7} className="tag-warn">
+                  <td colSpan={8} className="tag-warn">
                     {view === "failed" ? "no failures recorded" : "none yet"}
                   </td>
                 </tr>

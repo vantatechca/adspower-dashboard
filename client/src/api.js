@@ -32,6 +32,7 @@ export const api = {
   suggest: (count) => req("POST", "/api/proxies/suggest", { count }),
   sync: () => req("POST", "/api/profiles/sync"),
   delProxy: (id) => req("DELETE", `/api/proxies/${id}`),
+  delProxiesBatch: (ids) => req("POST", "/api/proxies/delete-batch", { ids }),
   plan: (b) => req("POST", "/api/profiles/plan", b),
   profiles: () => req("GET", "/api/profiles"),
   delProfiles: (ids) => req("POST", "/api/profiles/delete", { ids }),

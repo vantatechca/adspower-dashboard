@@ -202,6 +202,18 @@ app.delete("/api/proxies/:id", appAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
+app.post("/api/proxies/delete-batch", appAuth, async (req, res) => {
+  const ids = (req.body?.ids || []).filter(Boolean);
+  if (!ids.length) return res.status(400).json({ error: "no proxies" });
+  const { rowCount } = await q(
+    // only 'unused' (which also covers proxies flagged as failed) can be
+    // deleted — a proxy currently 'used' by a live profile is left alone
+    `delete from proxies where id = any($1::int[]) and status = 'unused'`,
+    [ids]
+  );
+  res.json({ ok: true, deleted: rowCount, skipped: ids.length - rowCount });
+});
+
 // ══ PROFILES / PLAN ═════════════════════════════════════════════════
 app.post("/api/profiles/plan", appAuth, async (req, res) => {
   const { prefix = "Profile", start = 1, group = "", proxy_ids = [], os = "random" } =
