@@ -19,6 +19,8 @@ export default function Proxies() {
   const [copiedId, setCopiedId] = useState(null);
   const [sel, setSel] = useState(new Set());
   const [delBusy, setDelBusy] = useState(false);
+  const [reconciling, setReconciling] = useState(false);
+  const [reconcileMsg, setReconcileMsg] = useState(null);
   const fileRef = useRef();
 
   function copyAddr(id, addr) {
@@ -90,6 +92,23 @@ export default function Proxies() {
       setMsg("Error: " + e.message);
     }
     setDelBusy(false);
+  }
+
+  async function reconcile() {
+    setReconciling(true);
+    setReconcileMsg(null);
+    try {
+      const r = await api.reconcileProxies();
+      setReconcileMsg(
+        r.freed
+          ? `Freed ${r.freed} proxy/proxies that were reserved but not actually tied to any profile.`
+          : "Nothing to free — no stuck proxies found."
+      );
+      refresh();
+    } catch (e) {
+      setReconcileMsg("Error: " + e.message);
+    }
+    setReconciling(false);
   }
 
   async function sync() {
@@ -204,10 +223,25 @@ export default function Proxies() {
               <span>failed</span>
             </span>
           </div>
-          <button className="ghost" onClick={sync} disabled={syncing}>
-            {syncing ? "Fetching…" : "Fetch from AdsPower"}
-          </button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              className="ghost"
+              onClick={reconcile}
+              disabled={reconciling}
+              title="Free proxies stuck 'used' with no profile actually pointing at them — e.g. after a reassignment that didn't finish cleanly"
+            >
+              {reconciling ? "Checking…" : "Free stuck proxies"}
+            </button>
+            <button className="ghost" onClick={sync} disabled={syncing}>
+              {syncing ? "Fetching…" : "Fetch from AdsPower"}
+            </button>
+          </div>
         </div>
+        {reconcileMsg && (
+          <div className="out" style={{ marginTop: 0, marginBottom: 8 }}>
+            {reconcileMsg}
+          </div>
+        )}
         {syncMsg && (
           <div className="out" style={{ marginTop: 0, marginBottom: 8 }}>
             {syncMsg}
