@@ -35,6 +35,7 @@ export const api = {
   plan: (b) => req("POST", "/api/profiles/plan", b),
   profiles: () => req("GET", "/api/profiles"),
   delProfiles: (ids) => req("POST", "/api/profiles/delete", { ids }),
+  reassignProxies: (names) => req("POST", "/api/profiles/reassign-proxy", { names }),
   jobs: () => req("GET", "/api/jobs"),
   exportUrl: () => "/api/export.csv",
 };

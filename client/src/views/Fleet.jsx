@@ -13,6 +13,9 @@ export default function Fleet() {
   const [syncMsg, setSyncMsg] = useState(null);
   const [autoSync, setAutoSync] = useState(false);
   const syncingRef = useRef(false);
+  const [reassignText, setReassignText] = useState("");
+  const [reassignBusy, setReassignBusy] = useState(false);
+  const [reassignMsg, setReassignMsg] = useState(null);
 
   async function refresh() {
     try {
@@ -76,6 +79,47 @@ export default function Fleet() {
     }
     setSyncing(false);
     syncingRef.current = false;
+  }
+
+  async function reassign() {
+    const names = reassignText
+      .split(/\r?\n/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (!names.length) return;
+    setReassignBusy(true);
+    setReassignMsg("Queuing…");
+    try {
+      const r = await api.reassignProxies(names);
+      let m = `Queued job #${r.job_id} — reassigning ${r.queued} profile(s).`;
+      if (r.notFound?.length)
+        m += ` ${r.notFound.length} name(s) not found (e.g. "${r.notFound[0]}").`;
+      if (r.skipped?.length)
+        m += ` ${r.skipped.length} skipped — no unused proxy available.`;
+      setReassignMsg(m);
+      setReassignText("");
+
+      let done = false;
+      for (let i = 0; i < 40 && !done; i++) {
+        await new Promise((res) => setTimeout(res, 3000));
+        const jobs = await api.jobs();
+        const j = jobs.find((x) => x.id === r.job_id);
+        if (!j) continue;
+        if (j.status === "done") {
+          const results = j.result?.results || [];
+          const ok = results.filter((x) => x.ok).length;
+          setReassignMsg((prev) => `${prev} Done — ${ok}/${results.length} reassigned.`);
+          done = true;
+        } else if (j.status === "error") {
+          setReassignMsg((prev) => `${prev} Job error — is the bridge online?`);
+          done = true;
+        }
+      }
+      refresh();
+    } catch (e) {
+      setReassignMsg("Error: " + e.message);
+    }
+    setReassignBusy(false);
   }
 
   async function del() {
@@ -226,6 +270,27 @@ export default function Fleet() {
             </tbody>
           </table>
         </div>
+      </div>
+
+      <div className="card">
+        <p className="eyebrow">reassign</p>
+        <h2>Reassign proxies</h2>
+        <p className="hint" style={{ marginTop: 0 }}>
+          Paste profile names, one per line. Each gets a fresh unused proxy in
+          AdsPower; its old proxy goes back to the unused pool once the bridge
+          confirms the swap.
+        </p>
+        <div className="field">
+          <textarea
+            value={reassignText}
+            onChange={(e) => setReassignText(e.target.value)}
+            placeholder={"Profile 1\nProfile 2\nProfile 3"}
+          />
+        </div>
+        <button onClick={reassign} disabled={reassignBusy || !reassignText.trim()}>
+          {reassignBusy ? "Working…" : "Assign new proxies"}
+        </button>
+        {reassignMsg && <div className="out">{reassignMsg}</div>}
       </div>
 
       <div className="card risk">

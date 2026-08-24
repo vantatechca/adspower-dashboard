@@ -261,6 +261,82 @@ app.get("/api/profiles", appAuth, async (_req, res) => {
   res.json(rows);
 });
 
+// reassign a fresh unused proxy to each named profile; the old proxy is
+// freed back to the unused pool once the bridge confirms the swap
+app.post("/api/profiles/reassign-proxy", appAuth, async (req, res) => {
+  const names = [
+    ...new Set((req.body?.names || []).map((n) => String(n).trim()).filter(Boolean)),
+  ];
+  if (!names.length) return res.status(400).json({ error: "no profile names" });
+
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const found = (
+      await client.query(
+        `select id, name, proxy_id, adspower_user_id from profiles
+         where status = 'created' and adspower_user_id <> '' and name = any($1::text[])
+         for update`,
+        [names]
+      )
+    ).rows;
+    const foundNames = new Set(found.map((p) => p.name));
+    const notFound = names.filter((n) => !foundNames.has(n));
+
+    const items = [];
+    const skipped = [];
+    for (const prof of found) {
+      const px = (
+        await client.query(
+          `select * from proxies where status = 'unused'
+           order by created_at asc limit 1 for update skip locked`
+        )
+      ).rows[0];
+      if (!px) {
+        skipped.push(prof.name);
+        continue;
+      }
+      // reserve the new proxy; reverted to 'unused' if the AdsPower update fails
+      await client.query(`update proxies set status='used' where id=$1`, [px.id]);
+      items.push({
+        profile_id: prof.id,
+        name: prof.name,
+        adspower_user_id: prof.adspower_user_id,
+        old_proxy_id: prof.proxy_id,
+        new_proxy_id: px.id,
+        proxy: {
+          type: px.proxy_type,
+          host: px.host,
+          port: px.port,
+          user: px.username,
+          pass: px.password,
+        },
+      });
+    }
+    if (!items.length) {
+      await client.query("rollback");
+      return res.status(400).json({
+        error: "no matching profiles with an unused proxy available",
+        notFound,
+        skipped,
+      });
+    }
+    const job = (
+      await client.query(
+        `insert into jobs (type, payload) values ('update_proxy', $1) returning id`,
+        [JSON.stringify({ items })]
+      )
+    ).rows[0];
+    await client.query("commit");
+    res.json({ ok: true, job_id: job.id, queued: items.length, notFound, skipped });
+  } catch (e) {
+    await client.query("rollback");
+    res.status(500).json({ error: e.message });
+  } finally {
+    client.release();
+  }
+});
+
 app.post("/api/profiles/delete", appAuth, async (req, res) => {
   const ids = (req.body?.ids || []).filter(Boolean);
   if (!ids.length) return res.status(400).json({ error: "no profiles" });
@@ -375,6 +451,29 @@ app.post("/api/bridge/jobs/:id/result", bridgeAuth, async (req, res) => {
           await client.query(
             `update profiles set status='deleted' where id=$1`,
             [r.profile_id]
+          );
+        }
+      }
+    } else if (job.type === "update_proxy") {
+      for (const r of results) {
+        if (r.ok) {
+          await client.query(`update profiles set proxy_id=$1 where id=$2`, [
+            r.new_proxy_id,
+            r.profile_id,
+          ]);
+          if (r.old_proxy_id) {
+            await client.query(`update proxies set status='unused' where id=$1`, [
+              r.old_proxy_id,
+            ]);
+          }
+        } else {
+          // update failed — release the reserved new proxy back to the pool
+          // and record the failure; the old proxy keeps serving the profile
+          await client.query(
+            `update proxies set status='unused', fail_count = fail_count + 1,
+             last_error = $1, last_failed_at = now()
+             where id = $2`,
+            [(r.msg || "unknown error").slice(0, 500), r.new_proxy_id]
           );
         }
       }
