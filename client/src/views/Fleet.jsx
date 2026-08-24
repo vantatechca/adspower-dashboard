@@ -16,6 +16,8 @@ export default function Fleet() {
   const [reassignText, setReassignText] = useState("");
   const [reassignBusy, setReassignBusy] = useState(false);
   const [reassignMsg, setReassignMsg] = useState(null);
+  const [reassignSource, setReassignSource] = useState("");
+  const [sources, setSources] = useState([]);
 
   async function refresh() {
     try {
@@ -24,8 +26,16 @@ export default function Fleet() {
       /* transient — keep last list */
     }
   }
+  async function loadSources() {
+    try {
+      setSources(await api.proxySources());
+    } catch (e) {
+      /* best-effort */
+    }
+  }
   useEffect(() => {
     refresh();
+    loadSources();
     const t = setInterval(refresh, 5000);
     return () => clearInterval(t);
   }, []);
@@ -90,14 +100,18 @@ export default function Fleet() {
     setReassignBusy(true);
     setReassignMsg("Queuing…");
     try {
-      const r = await api.reassignProxies(names);
+      const r = await api.reassignProxies(names, reassignSource);
       let m = `Queued job #${r.job_id} — reassigning ${r.queued} profile(s).`;
       if (r.notFound?.length)
         m += ` ${r.notFound.length} name(s) not found (e.g. "${r.notFound[0]}").`;
       if (r.skipped?.length)
-        m += ` ${r.skipped.length} skipped — no unused proxy available.`;
+        m +=
+          ` ${r.skipped.length} skipped — no unused proxy` +
+          (reassignSource ? ` from "${reassignSource}"` : "") +
+          ` available.`;
       setReassignMsg(m);
       setReassignText("");
+      loadSources();
 
       let done = false;
       for (let i = 0; i < 40 && !done; i++) {
@@ -280,6 +294,17 @@ export default function Fleet() {
           AdsPower; its old proxy goes back to the unused pool once the bridge
           confirms the swap.
         </p>
+        <div className="field" style={{ flex: "0 0 260px" }}>
+          <label>Proxy source</label>
+          <select value={reassignSource} onChange={(e) => setReassignSource(e.target.value)}>
+            <option value="">any source</option>
+            {sources.map((s) => (
+              <option key={s.source} value={s.source}>
+                {s.source} ({s.n} unused)
+              </option>
+            ))}
+          </select>
+        </div>
         <div className="field">
           <textarea
             value={reassignText}
