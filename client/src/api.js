@@ -34,6 +34,7 @@ export const api = {
   delProxy: (id) => req("DELETE", `/api/proxies/${id}`),
   delProxiesBatch: (ids) => req("POST", "/api/proxies/delete-batch", { ids }),
   reconcileProxies: () => req("POST", "/api/proxies/reconcile"),
+  testProxies: (ids) => req("POST", "/api/proxies/test-batch", { ids }),
   plan: (b) => req("POST", "/api/profiles/plan", b),
   profiles: () => req("GET", "/api/profiles"),
   delProfiles: (ids) => req("POST", "/api/profiles/delete", { ids }),

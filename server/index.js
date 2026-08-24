@@ -201,6 +201,30 @@ app.post("/api/proxies/suggest", appAuth, async (req, res) => {
   res.json(picked);
 });
 
+// queue a batch connectivity test — the bridge actually dials each proxy
+// from wherever it runs (typically alongside AdsPower), since testing from
+// the cloud server would give false negatives for IP-whitelisted proxies
+app.post("/api/proxies/test-batch", appAuth, async (req, res) => {
+  const ids = [...new Set((req.body?.ids || []).filter(Boolean))];
+  if (!ids.length) return res.status(400).json({ error: "no proxies" });
+  const { rows } = await q(`select * from proxies where id = any($1::int[])`, [ids]);
+  if (!rows.length) return res.status(400).json({ error: "no matching proxies" });
+  const items = rows.map((p) => ({
+    proxy_id: p.id,
+    type: p.proxy_type,
+    host: p.host,
+    port: p.port,
+    user: p.username,
+    pass: p.password,
+  }));
+  const job = (
+    await q(`insert into jobs (type, payload) values ('test_proxy', $1) returning id`, [
+      JSON.stringify({ items }),
+    ])
+  ).rows[0];
+  res.json({ ok: true, job_id: job.id, queued: items.length });
+});
+
 app.delete("/api/proxies/:id", appAuth, async (req, res) => {
   const { rowCount } = await q(
     `delete from proxies where id = $1 and status = 'unused'`,
@@ -554,6 +578,25 @@ app.post("/api/bridge/jobs/:id/result", bridgeAuth, async (req, res) => {
               [(r.msg || "unknown error").slice(0, 500), r.new_proxy_id]
             );
           }
+          await client.query("release savepoint sp");
+        } catch (e) {
+          await client.query("rollback to savepoint sp");
+        }
+      }
+    } else if (job.type === "test_proxy") {
+      for (const r of results) {
+        if (!r.proxy_id) continue;
+        await client.query("savepoint sp");
+        try {
+          await client.query(
+            `update proxies set
+               last_checked_at = now(),
+               last_check_ok = $1,
+               last_check_ms = $2,
+               last_check_error = $3
+             where id = $4`,
+            [Boolean(r.ok), r.ms ?? null, (r.msg || "").slice(0, 500), r.proxy_id]
+          );
           await client.query("release savepoint sp");
         } catch (e) {
           await client.query("rollback to savepoint sp");
