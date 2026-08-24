@@ -129,6 +129,7 @@ export default function Proxies() {
               `AdsPower returned ${s.returned} profile(s) — ` +
                 `${s.newProfile} new, ${s.updatedProfile} updated · ` +
                 `proxies: ${s.matchedProxy} matched, ${s.addedProxy} added` +
+                (s.freedProxy ? ` · ${s.freedProxy} freed (not on any live profile)` : "") +
                 (s.noProxyInfo ? ` · ${s.noProxyInfo} had no proxy info` : "") +
                 (s.failed
                   ? ` · ${s.failed} failed${s.errors?.length ? ` (${s.errors[0]})` : ""}`
