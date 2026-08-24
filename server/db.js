@@ -25,6 +25,11 @@ create table if not exists proxies (
 );
 create unique index if not exists proxies_uidx
   on proxies (host, port, username);
+-- failure tracking: bumped whenever a profile create using this proxy
+-- fails at AdsPower (the only point a proxy is actually exercised)
+alter table proxies add column if not exists fail_count integer default 0;
+alter table proxies add column if not exists last_error text default '';
+alter table proxies add column if not exists last_failed_at timestamptz;
 
 create table if not exists profiles (
   id               serial primary key,
