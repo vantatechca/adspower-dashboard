@@ -1,8 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api.js";
 
+function fullAddress(p) {
+  const base = `${p.host}:${p.port}`;
+  return p.username ? `${base}:${p.username}:${p.password}` : base;
+}
+
 export default function Proxies() {
-  const [stats, setStats] = useState({ unused: 0, used: 0 });
+  const [stats, setStats] = useState({ unused: 0, used: 0, failed: 0 });
   const [view, setView] = useState("unused");
   const [rows, setRows] = useState([]);
   const [text, setText] = useState("");
@@ -11,7 +16,15 @@ export default function Proxies() {
   const [busy, setBusy] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState(null);
+  const [copiedId, setCopiedId] = useState(null);
   const fileRef = useRef();
+
+  function copyAddr(id, addr) {
+    navigator.clipboard?.writeText(addr).then(() => {
+      setCopiedId(id);
+      setTimeout(() => setCopiedId((c) => (c === id ? null : c)), 1200);
+    });
+  }
 
   async function refresh() {
     setStats(await api.stats());
@@ -156,6 +169,10 @@ export default function Proxies() {
               <b>{stats.used}</b>
               <span>used</span>
             </span>
+            <span className="stat">
+              <b className="tag-bad">{stats.failed}</b>
+              <span>failed</span>
+            </span>
           </div>
           <button className="ghost" onClick={sync} disabled={syncing}>
             {syncing ? "Fetching…" : "Fetch from AdsPower"}
@@ -168,7 +185,7 @@ export default function Proxies() {
         )}
 
         <div className="tabs" style={{ marginBottom: 14 }}>
-          {["unused", "used"].map((v) => (
+          {["unused", "used", "failed"].map((v) => (
             <button
               key={v}
               className={"tab" + (view === v ? " active" : "")}
@@ -182,31 +199,93 @@ export default function Proxies() {
         <div className="scroll">
           <table>
             <thead>
-              {view === "unused" ? (
+              {view === "unused" && (
                 <tr>
-                  <th>Host</th>
-                  <th>Port</th>
+                  <th>Address</th>
                   <th>Type</th>
                   <th>Source</th>
+                  <th>Fails</th>
                   <th></th>
                 </tr>
-              ) : (
+              )}
+              {view === "used" && (
                 <tr>
                   <th>Profile</th>
-                  <th>Host</th>
-                  <th>Port</th>
+                  <th>Address</th>
                   <th>Type</th>
+                  <th>Fails</th>
+                </tr>
+              )}
+              {view === "failed" && (
+                <tr>
+                  <th>Address</th>
+                  <th>Type</th>
+                  <th>Source</th>
+                  <th>Fails</th>
+                  <th>Last error</th>
+                  <th>Last failed</th>
+                  <th></th>
                 </tr>
               )}
             </thead>
             <tbody>
-              {rows.map((p) =>
-                view === "unused" ? (
+              {rows.map((p) => {
+                const addr = fullAddress(p);
+                const addrCell = (
+                  <td
+                    style={{ cursor: "pointer" }}
+                    title={copiedId === p.id ? undefined : `${addr} — click to copy`}
+                    onClick={() => copyAddr(p.id, addr)}
+                  >
+                    {copiedId === p.id ? "copied ✓" : addr}
+                  </td>
+                );
+                const failsCell = (
+                  <td className={p.fail_count > 0 ? "tag-bad" : ""}>
+                    {p.fail_count > 0 ? p.fail_count : "—"}
+                  </td>
+                );
+                if (view === "unused")
+                  return (
+                    <tr key={p.id}>
+                      {addrCell}
+                      <td>{p.proxy_type}</td>
+                      <td className="tag-warn">{p.source || "—"}</td>
+                      {failsCell}
+                      <td>
+                        <span
+                          className="tag-bad"
+                          style={{ cursor: "pointer" }}
+                          onClick={() => del(p.id)}
+                        >
+                          del
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                if (view === "used")
+                  return (
+                    <tr key={p.id}>
+                      <td>{p.profile_name || "—"}</td>
+                      {addrCell}
+                      <td>{p.proxy_type}</td>
+                      {failsCell}
+                    </tr>
+                  );
+                return (
                   <tr key={p.id}>
-                    <td>{p.host}</td>
-                    <td>{p.port}</td>
+                    {addrCell}
                     <td>{p.proxy_type}</td>
                     <td className="tag-warn">{p.source || "—"}</td>
+                    <td className="tag-bad">{p.fail_count}</td>
+                    <td className="tag-bad" title={p.last_error}>
+                      {p.last_error ? p.last_error.slice(0, 48) : "—"}
+                    </td>
+                    <td>
+                      {p.last_failed_at
+                        ? new Date(p.last_failed_at).toLocaleString()
+                        : "—"}
+                    </td>
                     <td>
                       <span
                         className="tag-bad"
@@ -217,19 +296,12 @@ export default function Proxies() {
                       </span>
                     </td>
                   </tr>
-                ) : (
-                  <tr key={p.id}>
-                    <td>{p.profile_name || "—"}</td>
-                    <td>{p.host}</td>
-                    <td>{p.port}</td>
-                    <td>{p.proxy_type}</td>
-                  </tr>
-                )
-              )}
+                );
+              })}
               {!rows.length && (
                 <tr>
-                  <td colSpan={5} className="tag-warn">
-                    none yet
+                  <td colSpan={7} className="tag-warn">
+                    {view === "failed" ? "no failures recorded" : "none yet"}
                   </td>
                 </tr>
               )}

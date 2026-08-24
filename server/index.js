@@ -132,8 +132,12 @@ app.get("/api/proxies", appAuth, async (req, res) => {
   if (status === "unused" || status === "used") {
     params.push(status);
     sql += ` where p.status = $1`;
+  } else if (status === "failed") {
+    sql += ` where p.fail_count > 0`;
   }
-  sql += ` order by p.id desc limit 5000`;
+  sql += status === "failed"
+    ? ` order by p.last_failed_at desc nulls last, p.id desc limit 5000`
+    : ` order by p.id desc limit 5000`;
   const { rows } = await q(sql, params);
   res.json(rows);
 });
@@ -142,8 +146,10 @@ app.get("/api/proxies/stats", appAuth, async (_req, res) => {
   const { rows } = await q(
     `select status, count(*)::int as n from proxies group by status`
   );
-  const stats = { unused: 0, used: 0 };
+  const stats = { unused: 0, used: 0, failed: 0 };
   rows.forEach((r) => (stats[r.status] = r.n));
+  const failed = await q(`select count(*)::int as n from proxies where fail_count > 0`);
+  stats.failed = failed.rows[0].n;
   res.json(stats);
 });
 
@@ -348,11 +354,13 @@ app.post("/api/bridge/jobs/:id/result", bridgeAuth, async (req, res) => {
             `update profiles set status='failed' where id=$1`,
             [r.profile_id]
           );
-          // create failed — release the reserved proxy back to the pool
+          // create failed — release the reserved proxy back to the pool and
+          // record the failure so it shows up in the Proxies "failed" tab
           await client.query(
-            `update proxies set status='unused'
-             where id = (select proxy_id from profiles where id=$1)`,
-            [r.profile_id]
+            `update proxies set status='unused', fail_count = fail_count + 1,
+             last_error = $1, last_failed_at = now()
+             where id = (select proxy_id from profiles where id=$2)`,
+            [(r.msg || "unknown error").slice(0, 500), r.profile_id]
           );
         }
       }
