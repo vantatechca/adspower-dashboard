@@ -101,13 +101,20 @@ app.post("/api/proxies/upload", appAuth, async (req, res) => {
   let added = 0,
     dupe = 0;
   for (const p of all) {
-    if (!p.host || !p.port) continue;
+    // normalize before the uniqueness check: hostnames are case-insensitive,
+    // so "ISP.Oxylabs.io" and "isp.oxylabs.io" from two different exports of
+    // the same proxy must collide instead of being saved as two rows
+    const host = String(p.host || "").trim().toLowerCase();
+    const port = String(p.port || "").trim();
+    const username = String(p.username || "").trim();
+    const password = String(p.password || "").trim();
+    if (!host || !port) continue;
     const r = await q(
       `insert into proxies (host, port, username, password, proxy_type, raw, source)
        values ($1,$2,$3,$4,$5,$6,$7)
        on conflict (host, port, username) do nothing
        returning id`,
-      [p.host, p.port, p.username || "", p.password || "", p.proxy_type || "http", p.raw || "", source]
+      [host, port, username, password, p.proxy_type || "http", p.raw || "", source]
     );
     if (r.rowCount) added++;
     else dupe++;
