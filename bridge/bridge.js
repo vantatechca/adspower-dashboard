@@ -9,7 +9,7 @@ const AP_RATE = 1100; // AdsPower: 1 req/sec
 const HOST = os.hostname();
 // Bump when bridge behaviour changes; surfaced in the web UI so you can tell
 // at a glance whether the running bridge has the latest code.
-const BRIDGE_VERSION = "os-windows-fix";
+const BRIDGE_VERSION = "update-proxy";
 
 if (!CLOUD || !TOKEN) {
   console.error("Set CLOUD_URL and BRIDGE_TOKEN in bridge/.env");
@@ -140,6 +140,46 @@ async function runCreate(job) {
   return results;
 }
 
+async function runUpdateProxy(job) {
+  const items = job.payload.items || [];
+  console.log(`[update_proxy] job ${job.id}: ${items.length} profile(s)`);
+  const results = [];
+  for (const it of items) {
+    const px = it.proxy || {};
+    const payload = {
+      user_id: it.adspower_user_id,
+      user_proxy_config: {
+        proxy_soft: "other",
+        proxy_type: px.type || "http",
+        proxy_host: px.host,
+        proxy_port: px.port,
+        proxy_user: px.user || "",
+        proxy_password: px.pass || "",
+      },
+    };
+    try {
+      const r = await apPost("/api/v1/user/update", payload);
+      results.push({
+        profile_id: it.profile_id,
+        ok: r.code === 0,
+        msg: r.code === 0 ? "" : r.msg,
+        new_proxy_id: it.new_proxy_id,
+        old_proxy_id: it.old_proxy_id,
+      });
+    } catch (e) {
+      results.push({
+        profile_id: it.profile_id,
+        ok: false,
+        msg: e.message,
+        new_proxy_id: it.new_proxy_id,
+        old_proxy_id: it.old_proxy_id,
+      });
+    }
+    await sleep(AP_RATE);
+  }
+  return results;
+}
+
 async function runDelete(job) {
   const items = job.payload.items || [];
   const results = [];
@@ -218,6 +258,8 @@ async function tick() {
         ? await runCreate(job)
         : job.type === "delete"
         ? await runDelete(job)
+        : job.type === "update_proxy"
+        ? await runUpdateProxy(job)
         : await runSync(job);
     await cloud("POST", `/api/bridge/jobs/${job.id}/result`, { results });
     if (job.type === "sync") {
