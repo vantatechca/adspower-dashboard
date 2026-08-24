@@ -680,6 +680,54 @@ app.post("/api/bridge/jobs/:id/result", bridgeAuth, async (req, res) => {
       } catch (e) {
         await client.query("rollback to savepoint recon");
       }
+
+      // 3) reconcile stray 'used' proxies against AdsPower ground truth. A
+      //    proxy can end up marked 'used' without actually being configured
+      //    on any live AdsPower profile — a reservation that got stranded,
+      //    or a profile whose proxy was changed directly in AdsPower (step 1
+      //    above repoints profiles.proxy_id to the newly-matched proxy but
+      //    never frees whatever it used to point at). Free any 'used' proxy
+      //    whose host:port isn't configured on ANY live profile, unless it's
+      //    genuinely still reserved for a profile mid-create or mid-reassign.
+      //    Skipped entirely when AdsPower reported zero profiles with proxy
+      //    info — far more likely a fetch/API hiccup than a truly empty
+      //    account, and wiping every 'used' proxy on a hiccup would be worse
+      //    than leaving this pass for the next successful sync.
+      const liveHosts = [];
+      const livePorts = [];
+      for (const p of live) {
+        if (!p.host || !p.port) continue;
+        liveHosts.push(String(p.host).trim().toLowerCase());
+        livePorts.push(String(p.port).trim());
+      }
+      if (liveHosts.length) {
+        await client.query("savepoint proxrecon");
+        try {
+          const freedProxy = await client.query(
+            `update proxies set status = 'unused'
+             where status = 'used'
+               and not exists (
+                 select 1 from unnest($1::text[], $2::text[]) as t(h, p)
+                 where t.h = lower(proxies.host) and t.p = proxies.port
+               )
+               and not exists (
+                 select 1 from profiles
+                 where profiles.proxy_id = proxies.id and profiles.status = 'planned'
+               )
+               and not exists (
+                 select 1 from jobs, jsonb_array_elements(jobs.payload -> 'items') as item
+                 where jobs.type = 'update_proxy'
+                   and jobs.status in ('pending', 'running')
+                   and (item ->> 'new_proxy_id')::int = proxies.id
+               )`,
+            [liveHosts, livePorts]
+          );
+          syncSummary.freedProxy = freedProxy.rowCount;
+          await client.query("release savepoint proxrecon");
+        } catch (e) {
+          await client.query("rollback to savepoint proxrecon");
+        }
+      }
     }
     await client.query(
       `update jobs set status=$1, result=$2, finished_at=now() where id=$3`,

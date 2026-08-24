@@ -74,6 +74,7 @@ export default function Fleet() {
           setSyncMsg(
             s
               ? `AdsPower returned ${s.returned} profile(s) — ${s.newProfile} new, ${s.updatedProfile} updated` +
+                  (s.freedProxy ? ` · ${s.freedProxy} stray proxy/proxies freed` : "") +
                   (s.failed ? ` · ${s.failed} failed` : "")
               : "Synced with AdsPower."
           );
