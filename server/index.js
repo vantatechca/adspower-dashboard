@@ -99,7 +99,7 @@ app.post("/api/proxies/upload", appAuth, async (req, res) => {
   const all = [...parsed, ...recovered];
 
   let added = 0,
-    dupe = 0;
+    replaced = 0;
   for (const p of all) {
     // normalize before the uniqueness check: hostnames are case-insensitive,
     // so "ISP.Oxylabs.io" and "isp.oxylabs.io" from two different exports of
@@ -109,21 +109,30 @@ app.post("/api/proxies/upload", appAuth, async (req, res) => {
     const username = String(p.username || "").trim();
     const password = String(p.password || "").trim();
     if (!host || !port) continue;
+    // a re-upload of an already-saved (host, port, username) wins over what
+    // was saved before — the freshly uploaded password/type/source replace
+    // the old ones on the SAME row, so a profile already pointing at this
+    // proxy (status/id untouched) keeps working and AdsPower itself is
+    // never contacted here
     const r = await q(
       `insert into proxies (host, port, username, password, proxy_type, raw, source)
        values ($1,$2,$3,$4,$5,$6,$7)
-       on conflict (host, port, username) do nothing
-       returning id`,
+       on conflict (host, port, username) do update set
+         password = excluded.password,
+         proxy_type = excluded.proxy_type,
+         raw = excluded.raw,
+         source = excluded.source
+       returning (xmax = 0) as inserted`,
       [host, port, username, password, p.proxy_type || "http", p.raw || "", source]
     );
-    if (r.rowCount) added++;
-    else dupe++;
+    if (r.rows[0]?.inserted) added++;
+    else replaced++;
   }
 
   const stillFailed = failed.length - recovered.length;
   res.json({
     added,
-    duplicates: dupe,
+    replaced,
     aiRecovered: recovered.length,
     unparsed: stillFailed < 0 ? 0 : stillFailed,
     failedSample: failed.slice(0, 8),

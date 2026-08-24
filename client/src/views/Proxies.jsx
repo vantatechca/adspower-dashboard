@@ -51,7 +51,7 @@ export default function Proxies() {
     setMsg("Parsing…");
     try {
       const r = await api.upload(text, source);
-      let m = `Added ${r.added} · ${r.duplicates} dupes`;
+      let m = `Added ${r.added} · ${r.replaced} replaced (already-saved matches updated)`;
       if (r.aiRecovered) m += ` · ${r.aiRecovered} via AI`;
       if (r.unparsed) m += ` · ${r.unparsed} unparsed`;
       setMsg(m);
@@ -173,6 +173,11 @@ export default function Proxies() {
         <button onClick={upload} disabled={busy}>
           {busy ? "Working…" : "Parse & save"}
         </button>
+        <p className="hint">
+          Re-uploading a host:port:user already saved updates its password/type/source
+          in place — the newest upload wins. AdsPower profiles already using it aren't
+          touched.
+        </p>
         {msg && <div className="out">{msg}</div>}
       </div>
 
