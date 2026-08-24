@@ -1,5 +1,8 @@
 import "dotenv/config";
 import os from "os";
+import http from "http";
+import { HttpsProxyAgent } from "https-proxy-agent";
+import { SocksProxyAgent } from "socks-proxy-agent";
 
 const CLOUD = (process.env.CLOUD_URL || "").replace(/\/$/, "");
 const TOKEN = process.env.BRIDGE_TOKEN || "";
@@ -9,7 +12,14 @@ const AP_RATE = 1100; // AdsPower: 1 req/sec
 const HOST = os.hostname();
 // Bump when bridge behaviour changes; surfaced in the web UI so you can tell
 // at a glance whether the running bridge has the latest code.
-const BRIDGE_VERSION = "update-proxy";
+const BRIDGE_VERSION = "test-proxy";
+
+// proxy connectivity test: hits a lightweight "what's my IP" endpoint
+// through each proxy — no AdsPower involved, so unlike jobs that call the
+// local API, these can run with real concurrency instead of 1 req/sec
+const TEST_URL = "http://api.ipify.org";
+const TEST_TIMEOUT_MS = 10000;
+const TEST_CONCURRENCY = 10;
 
 if (!CLOUD || !TOKEN) {
   console.error("Set CLOUD_URL and BRIDGE_TOKEN in bridge/.env");
@@ -140,6 +150,59 @@ async function runCreate(job) {
   return results;
 }
 
+function buildProxyAgent(px) {
+  const auth = px.user ? `${encodeURIComponent(px.user)}:${encodeURIComponent(px.pass || "")}@` : "";
+  if (px.type === "socks5") return new SocksProxyAgent(`socks5://${auth}${px.host}:${px.port}`);
+  return new HttpsProxyAgent(`http://${auth}${px.host}:${px.port}`);
+}
+
+function testOneProxy(px) {
+  return new Promise((resolve) => {
+    const start = Date.now();
+    let agent;
+    try {
+      agent = buildProxyAgent(px);
+    } catch (e) {
+      return resolve({ proxy_id: px.proxy_id, ok: false, ms: 0, msg: e.message });
+    }
+    const req = http.get(TEST_URL, { agent, timeout: TEST_TIMEOUT_MS }, (res) => {
+      res.resume(); // drain, we only care about the status
+      res.on("end", () => {
+        const ok = res.statusCode >= 200 && res.statusCode < 400;
+        resolve({
+          proxy_id: px.proxy_id,
+          ok,
+          ms: Date.now() - start,
+          msg: ok ? "" : `HTTP ${res.statusCode}`,
+        });
+      });
+    });
+    req.on("timeout", () => req.destroy(new Error("timeout")));
+    req.on("error", (e) =>
+      resolve({ proxy_id: px.proxy_id, ok: false, ms: Date.now() - start, msg: e.message })
+    );
+  });
+}
+
+async function runTestProxy(job) {
+  const items = job.payload.items || [];
+  console.log(`[test_proxy] job ${job.id}: testing ${items.length} proxy/proxies`);
+  const results = [];
+  let next = 0;
+  async function worker() {
+    while (next < items.length) {
+      const px = items[next++];
+      results.push(await testOneProxy(px));
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(TEST_CONCURRENCY, items.length) }, worker)
+  );
+  const ok = results.filter((r) => r.ok).length;
+  console.log(`[test_proxy] job ${job.id}: ${ok}/${results.length} ok`);
+  return results;
+}
+
 async function runUpdateProxy(job) {
   const items = job.payload.items || [];
   console.log(`[update_proxy] job ${job.id}: ${items.length} profile(s)`);
@@ -253,14 +316,20 @@ async function tick() {
 
   console.log(`[job ${job.id}] ${job.type} — running`);
   try {
-    const results =
-      job.type === "create"
-        ? await runCreate(job)
-        : job.type === "delete"
-        ? await runDelete(job)
-        : job.type === "update_proxy"
-        ? await runUpdateProxy(job)
-        : await runSync(job);
+    // an unrecognized type used to silently fall through to runSync() here,
+    // which is how a stale bridge previously turned every reassignment
+    // attempt into "0 ok, N failed" with no error message — fail loud
+    // instead so a version mismatch is obvious in the Jobs tab
+    let results;
+    if (job.type === "create") results = await runCreate(job);
+    else if (job.type === "delete") results = await runDelete(job);
+    else if (job.type === "update_proxy") results = await runUpdateProxy(job);
+    else if (job.type === "test_proxy") results = await runTestProxy(job);
+    else if (job.type === "sync") results = await runSync(job);
+    else
+      throw new Error(
+        `unknown job type "${job.type}" — this bridge (${BRIDGE_VERSION}) is out of date, git pull and restart it`
+      );
     await cloud("POST", `/api/bridge/jobs/${job.id}/result`, { results });
     if (job.type === "sync") {
       console.log(`[job ${job.id}] sync done — ${results.length} profiles`);

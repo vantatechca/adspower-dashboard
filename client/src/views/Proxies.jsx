@@ -21,6 +21,8 @@ export default function Proxies() {
   const [delBusy, setDelBusy] = useState(false);
   const [reconciling, setReconciling] = useState(false);
   const [reconcileMsg, setReconcileMsg] = useState(null);
+  const [testing, setTesting] = useState(false);
+  const [testMsg, setTestMsg] = useState(null);
   const fileRef = useRef();
 
   function copyAddr(id, addr) {
@@ -92,6 +94,38 @@ export default function Proxies() {
       setMsg("Error: " + e.message);
     }
     setDelBusy(false);
+  }
+
+  async function testSelected() {
+    if (!sel.size) return;
+    setTesting(true);
+    setTestMsg("Queuing…");
+    try {
+      const r = await api.testProxies([...sel]);
+      setTestMsg(`Queued job #${r.job_id} — testing ${r.queued} proxy/proxies…`);
+      let done = false;
+      for (let i = 0; i < 60 && !done; i++) {
+        await new Promise((res) => setTimeout(res, 2000));
+        const jobs = await api.jobs();
+        const j = jobs.find((x) => x.id === r.job_id);
+        if (!j) continue;
+        if (j.status === "done") {
+          const results = j.result?.results || [];
+          const ok = results.filter((x) => x.ok).length;
+          setTestMsg(`Done — ${ok}/${results.length} reachable.`);
+          done = true;
+        } else if (j.status === "error") {
+          setTestMsg("Test job error — is the bridge online?");
+          done = true;
+        } else if (j.status === "pending" && i > 4) {
+          setTestMsg("Bridge hasn't picked it up — check it's online.");
+        }
+      }
+      refresh();
+    } catch (e) {
+      setTestMsg("Error: " + e.message);
+    }
+    setTesting(false);
   }
 
   async function reconcile() {
@@ -243,6 +277,11 @@ export default function Proxies() {
             {reconcileMsg}
           </div>
         )}
+        {testMsg && (
+          <div className="out" style={{ marginTop: 0, marginBottom: 8 }}>
+            {testMsg}
+          </div>
+        )}
         {syncMsg && (
           <div className="out" style={{ marginTop: 0, marginBottom: 8 }}>
             {syncMsg}
@@ -264,10 +303,17 @@ export default function Proxies() {
               </button>
             ))}
           </div>
-          {view !== "used" && sel.size > 0 && (
-            <button className="danger" onClick={delSelected} disabled={delBusy}>
-              {delBusy ? "Deleting…" : `Delete selected (${sel.size})`}
-            </button>
+          {sel.size > 0 && (
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="ghost" onClick={testSelected} disabled={testing}>
+                {testing ? "Testing…" : `Test selected (${sel.size})`}
+              </button>
+              {view !== "used" && (
+                <button className="danger" onClick={delSelected} disabled={delBusy}>
+                  {delBusy ? "Deleting…" : `Delete selected (${sel.size})`}
+                </button>
+              )}
+            </div>
           )}
         </div>
 
@@ -291,15 +337,28 @@ export default function Proxies() {
                   <th>Type</th>
                   <th>Source</th>
                   <th>Fails</th>
+                  <th>Checked</th>
                   <th></th>
                 </tr>
               )}
               {view === "used" && (
                 <tr>
+                  <th>
+                    <input
+                      type="checkbox"
+                      title="Select all"
+                      checked={rows.length > 0 && sel.size === rows.length}
+                      onChange={(e) =>
+                        setSel(e.target.checked ? new Set(rows.map((p) => p.id)) : new Set())
+                      }
+                      style={{ width: "auto" }}
+                    />
+                  </th>
                   <th>Profile</th>
                   <th>Address</th>
                   <th>Type</th>
                   <th>Fails</th>
+                  <th>Checked</th>
                 </tr>
               )}
               {view === "failed" && (
@@ -321,6 +380,7 @@ export default function Proxies() {
                   <th>Fails</th>
                   <th>Last error</th>
                   <th>Last failed</th>
+                  <th>Checked</th>
                   <th></th>
                 </tr>
               )}
@@ -352,6 +412,30 @@ export default function Proxies() {
                     />
                   </td>
                 );
+                const checkedCell = (
+                  <td
+                    className={
+                      p.last_check_ok === true
+                        ? "tag-ok"
+                        : p.last_check_ok === false
+                        ? "tag-bad"
+                        : undefined
+                    }
+                    title={
+                      p.last_checked_at
+                        ? `${p.last_check_ok ? "reachable" : "unreachable"} — checked ${new Date(
+                            p.last_checked_at
+                          ).toLocaleString()}` + (p.last_check_error ? ` — ${p.last_check_error}` : "")
+                        : "never tested"
+                    }
+                  >
+                    {p.last_checked_at
+                      ? p.last_check_ok
+                        ? `ok${p.last_check_ms != null ? ` ${p.last_check_ms}ms` : ""}`
+                        : "fail"
+                      : "—"}
+                  </td>
+                );
                 if (view === "unused")
                   return (
                     <tr key={p.id}>
@@ -360,6 +444,7 @@ export default function Proxies() {
                       <td>{p.proxy_type}</td>
                       <td className="tag-warn">{p.source || "—"}</td>
                       {failsCell}
+                      {checkedCell}
                       <td>
                         <span
                           className="tag-bad"
@@ -374,10 +459,12 @@ export default function Proxies() {
                 if (view === "used")
                   return (
                     <tr key={p.id}>
+                      {checkCell}
                       <td>{p.profile_name || "—"}</td>
                       {addrCell}
                       <td>{p.proxy_type}</td>
                       {failsCell}
+                      {checkedCell}
                     </tr>
                   );
                 return (
@@ -395,6 +482,7 @@ export default function Proxies() {
                         ? new Date(p.last_failed_at).toLocaleString()
                         : "—"}
                     </td>
+                    {checkedCell}
                     <td>
                       <span
                         className="tag-bad"
@@ -409,7 +497,7 @@ export default function Proxies() {
               })}
               {!rows.length && (
                 <tr>
-                  <td colSpan={8} className="tag-warn">
+                  <td colSpan={9} className="tag-warn">
                     {view === "failed" ? "no failures recorded" : "none yet"}
                   </td>
                 </tr>

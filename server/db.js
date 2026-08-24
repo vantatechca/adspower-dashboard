@@ -30,6 +30,13 @@ create unique index if not exists proxies_uidx
 alter table proxies add column if not exists fail_count integer default 0;
 alter table proxies add column if not exists last_error text default '';
 alter table proxies add column if not exists last_failed_at timestamptz;
+-- direct connectivity checks (batch "test proxies"), separate from the
+-- AdsPower-operation failure tracking above: this reflects whether the
+-- proxy itself answers a live request, checked on demand
+alter table proxies add column if not exists last_checked_at timestamptz;
+alter table proxies add column if not exists last_check_ok boolean;
+alter table proxies add column if not exists last_check_ms integer;
+alter table proxies add column if not exists last_check_error text default '';
 
 create table if not exists profiles (
   id               serial primary key,

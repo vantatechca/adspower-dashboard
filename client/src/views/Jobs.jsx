@@ -44,7 +44,8 @@ export default function Jobs() {
       <p className="eyebrow">04 / activity</p>
       <h2>Job log</h2>
       <p className="hint" style={{ marginTop: 0 }}>
-        Every create, delete, reassign, and AdsPower fetch runs as a job the bridge picks up. See
+        Every create, delete, reassign, connectivity test, and AdsPower fetch runs as a job the
+        bridge picks up. See
         the Profiles tab for the resulting fleet. The Result column shows what the bridge/AdsPower
         actually reported — hover a row for the full raw result. A job stuck on "pending" means
         the bridge isn't polling (check it's online and running the latest code); "running" with
