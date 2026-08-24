@@ -223,6 +223,34 @@ app.post("/api/proxies/delete-batch", appAuth, async (req, res) => {
   res.json({ ok: true, deleted: rowCount, skipped: ids.length - rowCount });
 });
 
+// safety valve: a proxy can be reserved ('used') while it's queued into a
+// create/reassign job, then never get its status flipped back if the job's
+// result never lands cleanly (bridge offline, crashed job, stale bridge
+// version). This frees any 'used' proxy that:
+//   - no live profile ('planned', still awaiting its create job, or
+//     'created') actually points at, and
+//   - isn't the reserved new-proxy of a still in-flight ('pending' or
+//     'running') reassignment job
+// so it doesn't stay stranded out of the unused pool while genuinely
+// in-flight reservations are left untouched.
+app.post("/api/proxies/reconcile", appAuth, async (req, res) => {
+  const { rowCount } = await q(
+    `update proxies set status = 'unused'
+     where status = 'used'
+       and not exists (
+         select 1 from profiles
+         where profiles.proxy_id = proxies.id and profiles.status in ('planned', 'created')
+       )
+       and not exists (
+         select 1 from jobs, jsonb_array_elements(jobs.payload -> 'items') as item
+         where jobs.type = 'update_proxy'
+           and jobs.status in ('pending', 'running')
+           and (item ->> 'new_proxy_id')::int = proxies.id
+       )`
+  );
+  res.json({ ok: true, freed: rowCount });
+});
+
 // ══ PROFILES / PLAN ═════════════════════════════════════════════════
 app.post("/api/profiles/plan", appAuth, async (req, res) => {
   const { prefix = "Profile", start = 1, group = "", proxy_ids = [], os = "random" } =
@@ -499,26 +527,36 @@ app.post("/api/bridge/jobs/:id/result", bridgeAuth, async (req, res) => {
         }
       }
     } else if (job.type === "update_proxy") {
+      // each result runs inside its own savepoint: one malformed/unexpected
+      // result (e.g. a stale bridge posting a different shape) must not
+      // abort the whole batch and strand every other reserved proxy as
+      // 'used' with no code path left to free it back to the pool
       for (const r of results) {
-        if (r.ok) {
-          await client.query(`update profiles set proxy_id=$1 where id=$2`, [
-            r.new_proxy_id,
-            r.profile_id,
-          ]);
-          if (r.old_proxy_id) {
-            await client.query(`update proxies set status='unused' where id=$1`, [
-              r.old_proxy_id,
+        await client.query("savepoint sp");
+        try {
+          if (r.ok && r.new_proxy_id && r.profile_id) {
+            await client.query(`update profiles set proxy_id=$1 where id=$2`, [
+              r.new_proxy_id,
+              r.profile_id,
             ]);
+            if (r.old_proxy_id) {
+              await client.query(`update proxies set status='unused' where id=$1`, [
+                r.old_proxy_id,
+              ]);
+            }
+          } else if (r.new_proxy_id) {
+            // update failed — release the reserved new proxy back to the
+            // pool and record the failure; the old proxy keeps serving
+            await client.query(
+              `update proxies set status='unused', fail_count = fail_count + 1,
+               last_error = $1, last_failed_at = now()
+               where id = $2`,
+              [(r.msg || "unknown error").slice(0, 500), r.new_proxy_id]
+            );
           }
-        } else {
-          // update failed — release the reserved new proxy back to the pool
-          // and record the failure; the old proxy keeps serving the profile
-          await client.query(
-            `update proxies set status='unused', fail_count = fail_count + 1,
-             last_error = $1, last_failed_at = now()
-             where id = $2`,
-            [(r.msg || "unknown error").slice(0, 500), r.new_proxy_id]
-          );
+          await client.query("release savepoint sp");
+        } catch (e) {
+          await client.query("rollback to savepoint sp");
         }
       }
     } else if (job.type === "sync") {
