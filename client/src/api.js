@@ -38,6 +38,8 @@ export const api = {
   plan: (b) => req("POST", "/api/profiles/plan", b),
   profiles: () => req("GET", "/api/profiles"),
   delProfiles: (ids) => req("POST", "/api/profiles/delete", { ids }),
+  previewDelBatch: (text) => req("POST", "/api/profiles/delete-batch/preview", { text }),
+  delProfilesBatch: (text) => req("POST", "/api/profiles/delete-batch", { text }),
   reassignProxies: (names, source) =>
     req("POST", "/api/profiles/reassign-proxy", { names, source }),
   proxySources: () => req("GET", "/api/proxies/sources"),

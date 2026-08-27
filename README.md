@@ -78,6 +78,16 @@ Use `pm2` (above) with `pm2 startup`, or a LaunchAgent plist that runs `node bri
 4. **Jobs tab** — see profiles + job log, export a CSV, or queue deletions (frees proxies
    back to `unused`).
 
+### Batch delete
+
+Ticking checkboxes is fine for a handful of profiles, not for a few hundred. The
+**Profiles tab** has a *Batch delete* card: paste the list — profile names or AdsPower
+ids, one per line (commas and tabs work too, so a spreadsheet column pastes straight in),
+names matched regardless of casing. It previews exactly what the list hits — what will be
+deleted, what's skipped (already deleted, still `planned`, no AdsPower id) and what
+matched nothing — before you type `DELETE` to queue it. Everything goes out as one job,
+and each freed proxy returns to `unused` as the bridge confirms removal.
+
 ## Local dev
 
 ```bash

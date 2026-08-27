@@ -18,6 +18,11 @@ export default function Fleet() {
   const [reassignMsg, setReassignMsg] = useState(null);
   const [reassignSource, setReassignSource] = useState("");
   const [sources, setSources] = useState([]);
+  const [batchText, setBatchText] = useState("");
+  const [batchPreview, setBatchPreview] = useState(null);
+  const [batchConfirm, setBatchConfirm] = useState("");
+  const [batchBusy, setBatchBusy] = useState(false);
+  const [batchMsg, setBatchMsg] = useState(null);
 
   async function refresh() {
     try {
@@ -135,6 +140,70 @@ export default function Fleet() {
       setReassignMsg("Error: " + e.message);
     }
     setReassignBusy(false);
+  }
+
+  // live preview of a pasted list: the server resolves names/AdsPower ids
+  // against the fleet so you see exactly what a paste would hit before
+  // anything is queued. Purely informational — the delete below re-resolves
+  // the text server-side, so it can never act on a stale preview.
+  useEffect(() => {
+    if (!batchText.trim()) {
+      setBatchPreview(null);
+      return;
+    }
+    let alive = true;
+    const t = setTimeout(() => {
+      api
+        .previewDelBatch(batchText)
+        .then((p) => alive && setBatchPreview(p))
+        .catch(() => alive && setBatchPreview(null));
+    }, 400);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+  }, [batchText]);
+
+  async function batchDel() {
+    if (batchConfirm.trim() !== "DELETE" || !batchText.trim()) return;
+    setBatchBusy(true);
+    setBatchMsg("Queuing…");
+    try {
+      const r = await api.delProfilesBatch(batchText);
+      let m = `Queued delete job #${r.job_id} — ${r.queued} profile(s). The bridge will remove them.`;
+      if (r.skipped?.length)
+        m += ` ${r.skipped.length} skipped (${r.skipped[0].name}: ${r.skipped[0].reason}${
+          r.skipped.length > 1 ? ", …" : ""
+        }).`;
+      if (r.notFound?.length)
+        m += ` ${r.notFound.length} not found (e.g. "${r.notFound[0]}").`;
+      setBatchMsg(m);
+      setBatchText("");
+      setBatchPreview(null);
+      setBatchConfirm("");
+      refresh();
+
+      let done = false;
+      for (let i = 0; i < 40 && !done; i++) {
+        await new Promise((res) => setTimeout(res, 3000));
+        const jobs = await api.jobs();
+        const j = jobs.find((x) => x.id === r.job_id);
+        if (!j) continue;
+        if (j.status === "done") {
+          const results = j.result?.results || [];
+          const ok = results.filter((x) => x.ok).length;
+          setBatchMsg((prev) => `${prev} Done — ${ok}/${results.length} deleted.`);
+          done = true;
+        } else if (j.status === "error") {
+          setBatchMsg((prev) => `${prev} Job error — is the bridge online?`);
+          done = true;
+        }
+      }
+      refresh();
+    } catch (e) {
+      setBatchMsg("Error: " + e.message);
+    }
+    setBatchBusy(false);
   }
 
   async function del() {
@@ -317,6 +386,125 @@ export default function Fleet() {
           {reassignBusy ? "Working…" : "Assign new proxies"}
         </button>
         {reassignMsg && <div className="out">{reassignMsg}</div>}
+      </div>
+
+      <div className="card risk">
+        <p className="eyebrow">danger</p>
+        <h2>Batch delete</h2>
+        <p className="hint" style={{ marginTop: 0 }}>
+          Paste a profile list — names or AdsPower ids, one per line (commas and
+          tabs work too, so a column straight out of a spreadsheet is fine).
+          Names match regardless of casing. Every match is queued for deletion
+          in one job, and each freed proxy goes back to the unused pool once the
+          bridge confirms removal.
+        </p>
+        <div className="field">
+          <textarea
+            value={batchText}
+            onChange={(e) => setBatchText(e.target.value)}
+            placeholder={"Profile 1\nProfile 2\nProfile 3"}
+            rows={8}
+          />
+        </div>
+
+        {batchPreview && (
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ margin: "0 0 8px" }}>
+              <span className="stat">
+                <b className="tag-bad">{batchPreview.deletable.length}</b>
+                <span>will delete</span>
+              </span>
+              {batchPreview.skipped.length > 0 && (
+                <span className="stat">
+                  <b className="tag-warn">{batchPreview.skipped.length}</b>
+                  <span>skipped</span>
+                </span>
+              )}
+              {batchPreview.notFound.length > 0 && (
+                <span className="stat">
+                  <b className="tag-warn">{batchPreview.notFound.length}</b>
+                  <span>not found</span>
+                </span>
+              )}
+              <span className="stat">
+                <b>{batchPreview.parsed}</b>
+                <span>pasted</span>
+              </span>
+            </div>
+
+            {batchPreview.deletable.length > 0 && (
+              <div className="scroll" style={{ maxHeight: 220 }}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Group</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {batchPreview.deletable.map((p) => (
+                      <tr key={p.id}>
+                        <td>{p.name}</td>
+                        <td>{p.group_name || "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {batchPreview.skipped.length > 0 && (
+              <p className="hint">
+                Skipped (not a live AdsPower profile):{" "}
+                {batchPreview.skipped
+                  .slice(0, 10)
+                  .map((s) => `${s.name} — ${s.reason}`)
+                  .join(", ")}
+                {batchPreview.skipped.length > 10 &&
+                  ` … +${batchPreview.skipped.length - 10} more`}
+              </p>
+            )}
+            {batchPreview.notFound.length > 0 && (
+              <p className="hint">
+                No such profile: {batchPreview.notFound.slice(0, 10).join(", ")}
+                {batchPreview.notFound.length > 10 &&
+                  ` … +${batchPreview.notFound.length - 10} more`}
+              </p>
+            )}
+          </div>
+        )}
+
+        <div className="row" style={{ alignItems: "flex-end" }}>
+          <div>
+            <label>
+              Type <b className="tag-bad">DELETE</b> to confirm
+            </label>
+            <input
+              value={batchConfirm}
+              onChange={(e) => setBatchConfirm(e.target.value)}
+            />
+          </div>
+          <div style={{ flex: "0 0 200px" }}>
+            <button
+              className="danger"
+              disabled={
+                batchBusy ||
+                batchConfirm.trim() !== "DELETE" ||
+                !batchPreview?.deletable.length
+              }
+              onClick={batchDel}
+            >
+              {batchBusy
+                ? "Working…"
+                : `Queue delete${
+                    batchPreview?.deletable.length
+                      ? ` (${batchPreview.deletable.length})`
+                      : ""
+                  }`}
+            </button>
+          </div>
+        </div>
+        {batchMsg && <div className="out">{batchMsg}</div>}
       </div>
 
       <div className="card risk">

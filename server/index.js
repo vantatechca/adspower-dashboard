@@ -451,6 +451,99 @@ app.post("/api/profiles/delete", appAuth, async (req, res) => {
   res.json({ ok: true, job_id: job.id, queued: rows.length });
 });
 
+// ── batch delete from a pasted list ─────────────────────────────────
+// The Fleet table works for a handful of profiles; deleting a few hundred
+// by ticking checkboxes doesn't. These two endpoints take a pasted blob
+// straight out of a spreadsheet/AdsPower export and resolve it against the
+// fleet — /preview is side-effect free so the UI can show exactly what a
+// list would hit before anything is queued.
+const splitEntries = (text) =>
+  String(text || "")
+    .split(/[\r\n,\t]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+// entries may be profile names (matched case-insensitively, since pasted
+// lists rarely preserve casing) or AdsPower user ids
+async function resolveProfileEntries(raw) {
+  const entries = [];
+  const seen = new Set();
+  for (const e of raw) {
+    const k = e.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    entries.push(e);
+  }
+  if (!entries.length) return { entries, deletable: [], skipped: [], notFound: [] };
+
+  const { rows } = await q(
+    `select id, name, group_name, status, adspower_user_id from profiles
+     where lower(name) = any($1::text[]) or lower(adspower_user_id) = any($1::text[])
+     order by id asc`,
+    [entries.map((e) => e.toLowerCase())]
+  );
+
+  const matched = new Set();
+  const deletable = [];
+  const skipped = [];
+  for (const p of rows) {
+    matched.add(p.name.toLowerCase());
+    if (p.adspower_user_id) matched.add(p.adspower_user_id.toLowerCase());
+    if (p.status === "created" && p.adspower_user_id) deletable.push(p);
+    else
+      skipped.push({
+        name: p.name,
+        reason: p.status === "created" ? "no AdsPower id" : p.status,
+      });
+  }
+  const notFound = entries.filter((e) => !matched.has(e.toLowerCase()));
+  return { entries, deletable, skipped, notFound };
+}
+
+app.post("/api/profiles/delete-batch/preview", appAuth, async (req, res) => {
+  const r = await resolveProfileEntries(splitEntries(req.body?.text));
+  res.json({
+    ok: true,
+    parsed: r.entries.length,
+    deletable: r.deletable.map((p) => ({
+      id: p.id,
+      name: p.name,
+      group_name: p.group_name,
+    })),
+    skipped: r.skipped,
+    notFound: r.notFound,
+  });
+});
+
+app.post("/api/profiles/delete-batch", appAuth, async (req, res) => {
+  const r = await resolveProfileEntries(splitEntries(req.body?.text));
+  if (!r.entries.length) return res.status(400).json({ error: "nothing pasted" });
+  if (!r.deletable.length)
+    return res.status(400).json({
+      error: "no created profiles matched that list",
+      skipped: r.skipped,
+      notFound: r.notFound,
+    });
+  const job = (
+    await q(`insert into jobs (type, payload) values ('delete', $1) returning id`, [
+      JSON.stringify({
+        items: r.deletable.map((p) => ({
+          profile_id: p.id,
+          adspower_user_id: p.adspower_user_id,
+        })),
+      }),
+    ])
+  ).rows[0];
+  res.json({
+    ok: true,
+    job_id: job.id,
+    queued: r.deletable.length,
+    parsed: r.entries.length,
+    skipped: r.skipped,
+    notFound: r.notFound,
+  });
+});
+
 // enqueue a sync job (bridge pulls AdsPower's real profile list to reconcile)
 app.post("/api/profiles/sync", appAuth, async (_req, res) => {
   const job = (
